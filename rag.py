@@ -44,27 +44,32 @@ def query_document(
     """
     Searches the FAISS index for relevant chunks.
     If the highest similarity score meets the threshold, returns top_k chunks and their scores.
-    Otherwise, returns (None, score) indicating search fell below threshold.
+    Otherwise, returns ([], score) indicating search fell below threshold.
     """
-    if not index or not chunks:
-        return None, 0.0
+    try:
+        if not index or not chunks:
+            return [], 0.0
+            
+        # Generate query embedding and normalize
+        query_emb = model.encode([query], normalize_embeddings=True)
+        query_emb = np.array(query_emb).astype("float32")
         
-    # Generate query embedding and normalize
-    query_emb = model.encode([query], normalize_embeddings=True)
-    query_emb = np.array(query_emb).astype("float32")
-    
-    # Retrieve top_k results
-    k = min(top_k, len(chunks))
-    scores, indices = index.search(query_emb, k)
-    
-    # Extract the top score (highest cosine similarity)
-    top_score = float(scores[0][0])
-    
-    if top_score >= threshold:
-        retrieved_chunks = [chunks[idx] for idx in indices[0] if idx != -1]
-        return retrieved_chunks, top_score
+        # Retrieve top_k results
+        k = min(top_k, len(chunks))
+        scores, indices = index.search(query_emb, k)
         
-    return None, top_score
+        # Extract the top score (highest cosine similarity)
+        top_score = float(scores[0][0])
+        
+        if top_score >= threshold:
+            retrieved_chunks = [chunks[idx] for idx in indices[0] if idx != -1]
+            return retrieved_chunks, top_score
+            
+        return [], top_score
+    except Exception as e:
+        print(f"[query_document Error]: {e}")
+        return [], 0.0
+
 
 
 def generate_groq_answer(
@@ -95,3 +100,28 @@ def generate_groq_answer(
                 f"Please update 'GROQ_MODEL' in your '.env' file to a supported model."
             )
         return f"Error communicating with Groq API: {e}"
+
+
+def save_faiss_index(index, chunks: list, index_path: str, chunks_path: str):
+    """
+    Saves the FAISS index and the associated text chunks to disk.
+    """
+    import os
+    import json
+    os.makedirs(os.path.dirname(index_path), exist_ok=True)
+    os.makedirs(os.path.dirname(chunks_path), exist_ok=True)
+    faiss.write_index(index, index_path)
+    with open(chunks_path, "w", encoding="utf-8") as f:
+        json.dump(chunks, f, ensure_ascii=False)
+
+
+def load_faiss_index(index_path: str, chunks_path: str) -> tuple:
+    """
+    Loads the FAISS index and the associated text chunks from disk.
+    """
+    import json
+    index = faiss.read_index(index_path)
+    with open(chunks_path, "r", encoding="utf-8") as f:
+        chunks = json.load(f)
+    return index, chunks
+
