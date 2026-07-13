@@ -38,37 +38,49 @@ def query_document(
     index: faiss.IndexFlatIP, 
     chunks: list, 
     model: SentenceTransformer, 
-    threshold: float = 0.35, 
+    threshold: float = 0.15, 
     top_k: int = 3
 ) -> tuple:
     """
     Searches the FAISS index for relevant chunks.
-    If the highest similarity score meets the threshold, returns top_k chunks and their scores.
-    Otherwise, returns ([], score) indicating search fell below threshold.
+    Returns (retrieved_chunks, max_score, top_hits).
     """
     try:
         if not index or not chunks:
-            return [], 0.0
+            return [], 0.0, []
             
         # Generate query embedding and normalize
         query_emb = model.encode([query], normalize_embeddings=True)
         query_emb = np.array(query_emb).astype("float32")
         
-        # Retrieve top_k results
-        k = min(top_k, len(chunks))
+        # Retrieve at least 5 results (or len(chunks)) to get top 5 similarity scores for debugging
+        k = min(max(top_k, 5), len(chunks))
         scores, indices = index.search(query_emb, k)
         
         # Extract the top score (highest cosine similarity)
         top_score = float(scores[0][0])
         
-        if top_score >= threshold:
-            retrieved_chunks = [chunks[idx] for idx in indices[0] if idx != -1]
-            return retrieved_chunks, top_score
-            
-        return [], top_score
+        top_hits = []
+        for rank_idx, (score, idx) in enumerate(zip(scores[0], indices[0])):
+            if idx != -1:
+                top_hits.append({
+                    "rank": rank_idx + 1,
+                    "idx": int(idx),
+                    "score": float(score),
+                    "text": chunks[idx]
+                })
+        
+        # Select chunks that are above the similarity threshold (up to top_k chunks)
+        retrieved_chunks = []
+        for hit in top_hits[:top_k]:
+            if hit["score"] >= threshold:
+                retrieved_chunks.append(hit["text"])
+                
+        return retrieved_chunks, top_score, top_hits
     except Exception as e:
         print(f"[query_document Error]: {e}")
-        return [], 0.0
+        return [], 0.0, []
+
 
 
 

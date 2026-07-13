@@ -35,7 +35,7 @@ DocQuery-AI/
 ├── app.py           # Streamlit application (UI layout, state management, chat interaction)
 ├── rag.py           # Core RAG pipeline (index build, save/load persistence, Groq API client)
 ├── web_search.py    # Fallback search query executor using DuckDuckGo
-├── utils.py         # Text chunking, PDF loading, and system helpers
+├── utils.py         # PDF text extraction and text chunking
 ├── requirements.txt # Project Python package dependencies
 ├── .env.example     # Configuration template for API keys and models
 └── README.md        # System documentation and instructions

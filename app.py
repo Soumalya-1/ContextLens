@@ -1,5 +1,4 @@
 import os
-import sys
 import streamlit as st
 from dotenv import load_dotenv
 from groq import Groq
@@ -78,7 +77,7 @@ st.markdown("""
 
 # Configuration Setup
 groq_api_key = os.getenv("GROQ_API_KEY")
-similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.20"))
+similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.15"))
 groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
 # Directories setup
@@ -91,11 +90,17 @@ os.makedirs(INDEX_DIR, exist_ok=True)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "debug_times" not in st.session_state:
-    st.session_state.debug_times = {"embedding": 0.0, "faiss_search": 0.0, "groq_api": 0.0, "web_search": 0.0}
+    st.session_state.debug_times = {"embedding": 0.0, "faiss_search": 0.0, "rag_routing": 0.0, "groq_api": 0.0, "web_search": 0.0}
 if "last_score" not in st.session_state:
     st.session_state.last_score = 0.0
 if "last_retrieved_chunks" not in st.session_state:
     st.session_state.last_retrieved_chunks = []
+if "last_query_top_hits" not in st.session_state:
+    st.session_state.last_query_top_hits = []
+if "last_router_decision" not in st.session_state:
+    st.session_state.last_router_decision = "N/A"
+if "debug_doc_info" not in st.session_state:
+    st.session_state.debug_doc_info = {}
 if "last_uploaded_processed" not in st.session_state:
     st.session_state.last_uploaded_processed = None
 
@@ -104,17 +109,42 @@ if not groq_api_key or groq_api_key == "your_key_here":
     st.error("❌ **GROQ_API_KEY is not set.** Please configure it in your `.env` file to start using the assistant.")
     st.stop()
 
-# Initialize API client
+# Initialize Groq client
 @st.cache_resource
 def get_groq_client():
     return Groq(api_key=groq_api_key)
 
 groq_client = get_groq_client()
 
-# Cache the heavy SentenceTransformer model
+# Cache the SentenceTransformer model
 @st.cache_resource
 def get_embedder():
     return load_embedder()
+
+# Helper function to gather and print document stats for Debug Mode
+def populate_debug_doc_info(pdf_path, index, chunks):
+    try:
+        raw_text = extract_text_from_pdf(pdf_path)
+        st.session_state.debug_doc_info = {
+            "text_len": len(raw_text),
+            "first_500": raw_text[:500],
+            "num_chunks": len(chunks),
+            "avg_chunk_size": sum(len(c) for c in chunks) / len(chunks) if chunks else 0,
+            "first_chunk": chunks[0] if chunks else "",
+            "dimension": index.d if index else 0,
+            "total_vectors": index.ntotal if index else 0
+        }
+        # Print diagnostic stats to terminal
+        print("\n=== [DIAGNOSTIC PIPELINE STATE: INDEX] ===")
+        print(f"1. Text Extraction: length = {len(raw_text)} characters")
+        print(f"   First 500 characters:\n{raw_text[:500]}")
+        print(f"2. Chunking: number of chunks = {len(chunks)}, average chunk size = {st.session_state.debug_doc_info['avg_chunk_size']:.2f}")
+        print(f"   First chunk:\n{st.session_state.debug_doc_info['first_chunk']}")
+        print(f"3. Embeddings: dimension = {index.d if index else 0}, vectors = {index.ntotal if index else 0}")
+        print(f"4. FAISS: total vectors stored = {index.ntotal if index else 0}")
+        print("==========================================\n")
+    except Exception as e:
+        print(f"[populate_debug_doc_info Error]: {e}")
 
 # Sidebar Layout
 st.sidebar.markdown("<h2 style='margin-bottom: 0px;'>ContextLens 🔍</h2>", unsafe_allow_html=True)
@@ -206,6 +236,7 @@ if active_doc:
                     st.session_state.chunks = chunks
                     st.session_state.loaded_doc_name = active_doc
                     st.session_state.debug_times["embedding"] = time.time() - start_t
+                    populate_debug_doc_info(pdf_path, index, chunks)
                 except Exception as e:
                     st.sidebar.error(f"Error loading index: {e}. Rebuilding...")
                     st.session_state.loaded_doc_name = None
@@ -239,6 +270,7 @@ if active_doc:
                 st.session_state.chunks = indexed_chunks
                 st.session_state.loaded_doc_name = active_doc
                 st.session_state.debug_times["embedding"] = time.time() - start_t
+                populate_debug_doc_info(pdf_path, index, indexed_chunks)
                 st.sidebar.success(f"⚡ Indexed {active_doc} successfully!")
             except Exception as e:
                 import traceback
@@ -251,29 +283,39 @@ if active_doc:
 
 # Sidebar Debug Information display
 if debug_mode:
-    st.sidebar.markdown("### 🐞 Debug Metrics")
-    st.sidebar.write(f"**Active Document**: `{active_doc}`")
-    st.sidebar.write(f"**Loaded in Memory**: `{st.session_state.get('loaded_doc_name')}`")
-    st.sidebar.write(f"**Number of Chunks**: `{len(st.session_state.get('chunks', []))}`")
-    st.sidebar.write(f"**Similarity Score**: `{st.session_state.get('last_score', 0.0):.4f}`")
-    
-    # Times
+    st.sidebar.markdown("### 📄 Document Analysis Stats")
+    doc_info = st.session_state.get("debug_doc_info", {})
+    if doc_info:
+        st.sidebar.write(f"- Extracted text length: `{doc_info.get('text_len', 0)}` chars")
+        st.sidebar.write(f"- Number of chunks: `{doc_info.get('num_chunks', 0)}`")
+        st.sidebar.write(f"- Average chunk size: `{doc_info.get('avg_chunk_size', 0.0):.2f}` chars")
+        st.sidebar.write(f"- FAISS dimension: `{doc_info.get('dimension', 0)}`")
+        st.sidebar.write(f"- Total vectors stored: `{doc_info.get('total_vectors', 0)}`")
+        with st.sidebar.expander("First Chunk Preview", expanded=False):
+            st.text(doc_info.get("first_chunk", ""))
+            
+    st.sidebar.markdown("### 🐞 Search Performance Metrics")
     times = st.session_state.get("debug_times", {})
-    st.sidebar.write("**Time Taken**:")
     st.sidebar.write(f"- Embedding/Index Load: `{times.get('embedding', 0.0):.4f}s`")
     st.sidebar.write(f"- FAISS search: `{times.get('faiss_search', 0.0):.4f}s`")
+    st.sidebar.write(f"- RAG Routing Audit: `{times.get('rag_routing', 0.0):.4f}s`")
     st.sidebar.write(f"- Groq API: `{times.get('groq_api', 0.0):.4f}s`")
     st.sidebar.write(f"- Web search: `{times.get('web_search', 0.0):.4f}s`")
+    st.sidebar.write(f"**Last Router Decision**: `{st.session_state.get('last_router_decision', 'N/A')}`")
+    st.sidebar.write(f"**Last Similarity Score**: `{st.session_state.get('last_score', 0.0):.4f}`")
     
-    with st.sidebar.expander("Retrieved Chunks Details", expanded=False):
-        chunks_list = st.session_state.get("last_retrieved_chunks", [])
-        if chunks_list:
-            for idx, c in enumerate(chunks_list, 1):
-                st.caption(f"**Chunk {idx}**:")
-                st.text(c)
+    with st.sidebar.expander("FAISS Top Search Hits", expanded=False):
+        top_hits_list = st.session_state.get("last_query_top_hits", [])
+        if top_hits_list:
+            for hit in top_hits_list:
+                # In LLM-based routing we retrieve top 3, show all top 5 retrieved details
+                tag = "✅ TOP CHUNK" if hit["rank"] <= 3 else "ℹ️ EXTRA CHUNK"
+                st.caption(f"**Rank {hit['rank']}** (Score: `{hit['score']:.4f}`) - {tag}")
+                st.caption(f"Chunk ID: `{hit['idx']}`")
+                st.text(hit["text"])
                 st.markdown("---")
         else:
-            st.caption("No chunks retrieved in last query.")
+            st.caption("No queries run yet.")
 
 # Main UI Area
 st.markdown("<h1 class='title-text'>ContextLens 🔍</h1>", unsafe_allow_html=True)
@@ -328,9 +370,11 @@ if query:
         max_score = 0.0
         doc_name = "N/A"
         retrieved_chunks = []
+        top_hits = []
         
         # Reset query-specific times
         st.session_state.debug_times["faiss_search"] = 0.0
+        st.session_state.debug_times["rag_routing"] = 0.0
         st.session_state.debug_times["groq_api"] = 0.0
         st.session_state.debug_times["web_search"] = 0.0
         
@@ -347,7 +391,6 @@ if query:
                 print(f"[STEP 2] Active document: {active_doc}")
                 
                 # [STEP 3] Loading FAISS index
-                # Index is validated and loaded globally, so we log its status here
                 status_box.write(f"📦 **[STEP 3] FAISS index status**: Ready for {active_doc} (contains {len(st.session_state.get('chunks', []))} chunks)")
                 print(f"[STEP 3] FAISS index status: Ready for {active_doc}")
                 
@@ -357,40 +400,83 @@ if query:
                 
                 start_t = time.time()
                 embedder = get_embedder()
-                retrieved_chunks, max_score = query_document(
+                # Always retrieve top 3 chunks (using threshold = -1.0)
+                retrieved_chunks, max_score, top_hits = query_document(
                     query=query,
                     index=st.session_state.index,
                     chunks=st.session_state.chunks,
                     model=embedder,
-                    threshold=similarity_threshold,
+                    threshold=-1.0,
                     top_k=3
                 )
                 st.session_state.debug_times["faiss_search"] = time.time() - start_t
                 st.session_state.last_score = max_score
-                st.session_state.last_retrieved_chunks = retrieved_chunks
+                st.session_state.last_query_top_hits = top_hits
+                
+                # Print FAISS details to terminal
+                print(f"[STEP 4] FAISS total vectors: {st.session_state.index.ntotal}")
+                print("[STEP 4] Top similarity scores:")
+                for hit in top_hits[:5]:
+                    print(f"   Rank {hit['rank']}: Score = {hit['score']:.6f}, Chunk Index = {hit['idx']}")
                 
                 # [STEP 5] Similarity score
-                status_box.write(f"📊 **[STEP 5] Similarity score**: {max_score:.4f} (Threshold: {similarity_threshold:.2f})")
+                status_box.write(f"📊 **[STEP 5] Similarity score**: {max_score:.4f}")
                 print(f"[STEP 5] Similarity score: {max_score:.4f}")
                 
-                # RAG or Web Fallback
+                # Debug query_document() to terminal
+                print(f"[STEP 5] query_document(): retrieved top {len(retrieved_chunks)} chunks from FAISS")
+                for idx, c in enumerate(retrieved_chunks):
+                    print(f"   Top Chunk {idx+1} [ID {top_hits[idx]['idx']}] (Score: {top_hits[idx]['score']:.6f}):\n{c[:200]}...")
+                
+                # Check context sufficiency using Groq
                 if retrieved_chunks:
-                    source = "📄 Document"
-                    doc_name = active_doc
                     context_text = "\n\n".join(retrieved_chunks)
-                    system_instruction = "Answer ONLY using the provided document context. Do not use outside knowledge."
-                    prompt = f"Document Context:\n{context_text}\n\nQuestion: {query}"
                     
-                    # [STEP 6] Calling Groq
-                    status_box.write(f"🤖 **[STEP 6] Calling Groq** using model `{groq_model}`...")
-                    print(f"[STEP 6] Calling Groq with model: {groq_model}")
+                    status_box.write("🔎 **[STEP 5a] Auditing context sufficiency** using LLM router...")
+                    print("[STEP 5a] Auditing context sufficiency using LLM...")
+                    
+                    router_system_instruction = (
+                        "You are an expert context auditor. Your job is to determine whether the provided document context "
+                        "contains sufficient information to answer the user's question. Respond with EXACTLY 'YES' or 'NO' "
+                        "(no explanation, no punctuation, no extra text, just the word)."
+                    )
+                    router_prompt = (
+                        f"Document Context:\n{context_text}\n\n"
+                        f"User Question: {query}\n\n"
+                        f"Does the document context contain enough information to answer the user's question? "
+                        f"Answer with YES or NO."
+                    )
                     
                     start_t = time.time()
-                    answer = generate_groq_answer(groq_client, prompt, system_instruction, model_name=groq_model)
-                    st.session_state.debug_times["groq_api"] = time.time() - start_t
-                else:
-                    status_box.write("🌐 **[STEP 5a] Similarity score below threshold**. Falling back to Web Search.")
-                    print("[STEP 5a] Below threshold, fallback to Web Search.")
+                    router_decision = generate_groq_answer(groq_client, router_prompt, router_system_instruction, model_name=groq_model)
+                    st.session_state.debug_times["rag_routing"] = time.time() - start_t
+                    
+                    clean_decision = router_decision.strip().upper()
+                    st.session_state.last_router_decision = clean_decision
+                    
+                    status_box.write(f"📊 **[STEP 5b] LLM Sufficiency Decision**: `{clean_decision}`")
+                    print(f"[STEP 5b] LLM Sufficiency Decision: {clean_decision}")
+                    
+                    if "YES" in clean_decision:
+                        source = "📄 Document"
+                        doc_name = active_doc
+                        system_instruction = "Answer ONLY using the provided document context. Do not use outside knowledge."
+                        prompt = f"Document Context:\n{context_text}\n\nQuestion: {query}"
+                        
+                        # [STEP 6] Calling Groq
+                        status_box.write(f"🤖 **[STEP 6] Calling Groq** using model `{groq_model}`...")
+                        print(f"[STEP 6] Calling Groq with model: {groq_model}")
+                        
+                        start_t = time.time()
+                        answer = generate_groq_answer(groq_client, prompt, system_instruction, model_name=groq_model)
+                        st.session_state.debug_times["groq_api"] = time.time() - start_t
+                    else:
+                        retrieved_chunks = []  # Clear to force fallback below
+                
+                # RAG or Web Fallback
+                if not retrieved_chunks:
+                    status_box.write("🌐 **[STEP 5c] Context insufficient or index empty**. Falling back to Web Search.")
+                    print("[STEP 5c] Below threshold / context insufficient, fallback to Web Search.")
                     
                     # [STEP 7] Running web search
                     status_box.write("🕸️ **[STEP 7] Running web search** via DuckDuckGo fallback...")
