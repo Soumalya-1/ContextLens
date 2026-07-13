@@ -6,15 +6,15 @@ ContextLens is a modern, lightweight Document Question Answering Assistant that 
 
 ## 🚀 Key Features
 
-1. **Modern Chat UI**: Implements a ChatGPT-like conversation interface with persistent message history using `st.session_state`.
-2. **Sidebar Document Hub**: Automatically scans `data/documents/` on startup. Users can upload a new PDF or instantly select previously uploaded ones.
-3. **Smart Persistence & Index Caching**: Generates embeddings and builds a FAISS similarity search index once per document. Saves the index and metadata into `data/index/` to prevent redundant work on subsequent loads.
-4. **Smart Threshold Routing**: 
-   - If the similarity score is **above the configured threshold** (default: `0.20`), the LLM answers using **only** document context (labeled `📄 Document`).
-   - If the score is **below the threshold**, it triggers a live web search using DuckDuckGo, and the LLM summarizes those search results (labeled `🌐 Web Search`).
-5. **Ultra-Fast & Private Inference**: Uses the fast Groq SDK API to generate context-grounded completions.
-6. **Debug Mode**: A toggleable metrics sidebar panel showing active document chunk details, similarity scores, and execution times (embedding, search, LLM, and web).
-
+- **Streamlit Interface**: Clean, ChatGPT-like conversation layout built for GitHub portfolio presentation.
+- **PDF Upload & Storage**: Upload files via `st.file_uploader` and store them persistently under `data/documents/`.
+- **FAISS Vector Search**: Fast similarity search using `IndexFlatIP` indexing.
+- **SentenceTransformer Embeddings**: High-quality dense vector representations using `all-MiniLM-L6-v2`.
+- **Groq LLM Integration**: Fast inference with the Groq client (`openai/gpt-oss-20b` or custom models).
+- **Intelligent RAG Routing**: Instead of relying purely on brittle thresholds, ContextLens uses an LLM-based sufficiency auditor to evaluate context before answering.
+- **Intelligent Web Fallback**: Uses a time-bounded (10s) DuckDuckGo search fallback if the document does not contain the answer.
+- **Chat History**: Preserves conversation history locally across session reruns using `st.session_state`.
+- **Debug Mode**: Toggleable metrics panel in the sidebar showing document analysis stats, top search hits, scores, and execution times (embedding, search, routing, Groq, and web search).
 
 ---
 
@@ -59,15 +59,28 @@ graph TD
     I --> G
     G --> J[Enable Chat Input]
     J --> K[User asks Question]
-    K --> L[Retrieve top 3 chunks]
-    L --> M{Max Similarity >= Threshold?}
-    M -->|Yes| N[Answer using Document Context]
-    M -->|No| O[Perform DuckDuckGo Web Search]
-    O --> P[Answer using Web Search Summarization]
-    N --> Q[Add to Chat History st.session_state]
-    P --> Q
-    Q --> J
+    K --> L[Retrieve top 3 chunks from FAISS]
+    L --> M[Ask Groq: Is context sufficient to answer?]
+    M --> N{Decision YES?}
+    N -->|Yes| O[Generate answer using Document Context]
+    N -->|No / Index empty| P[Perform DuckDuckGo Web Search]
+    P --> Q[Generate answer summarizing Web Results]
+    O --> R[Add to Chat History st.session_state]
+    Q --> R
+    R --> J
 ```
+
+---
+
+## ⚙️ How It Works
+
+1. **Upload PDF**: PDF documents uploaded via the Streamlit interface are stored under `data/documents/`.
+2. **Build Embeddings & Persistence**: The app parses the document text, splits it into overlapping 500-character chunks, embeds them using `all-MiniLM-L6-v2`, builds a FAISS index, and persists both index and chunks to `data/index/` for sub-second retrieval on future sessions.
+3. **FAISS Retrieval**: When a query is asked, the system retrieves the **top 3** most similar chunks from the FAISS index (using a threshold of `-1.0` to ensure candidates are retrieved).
+4. **LLM Context Evaluation**: The top 3 chunks are sent to the Groq LLM with an audit instruction. The LLM performs a sufficiency analysis and answers either `YES` or `NO` on whether the context is sufficient to answer the question.
+5. **Answer Generation**:
+   - If the audit returns **`YES`**, the LLM answers the query based **only** on the document chunks.
+   - If the audit returns **`NO`**, the system triggers a DuckDuckGo web search, gathers search snippets, and asks the LLM to summarize the results.
 
 ---
 
@@ -96,8 +109,17 @@ pip install -r requirements.txt
    ```env
    GROQ_API_KEY=gsk_your_actual_key_here
    GROQ_MODEL=openai/gpt-oss-20b
-   SIMILARITY_THRESHOLD=0.20
+   SIMILARITY_THRESHOLD=0.15
    ```
+
+---
+
+## ⚙️ Environment Variables
+
+ContextLens supports configuration via [`.env`](file:///C:/Projects/DocQuery-AI/.env):
+- `GROQ_API_KEY`: API credential key from console.groq.com.
+- `GROQ_MODEL`: Model Identifier (defaults to `openai/gpt-oss-20b`).
+- `SIMILARITY_THRESHOLD`: The baseline similarity threshold for document chunks (defaults to `0.15`).
 
 ---
 
@@ -126,6 +148,19 @@ Open `http://localhost:8501` in your browser.
 
 ### 3. Web Search Fallback (Web Source)
 `[=== Chat Bubble (User): "Who is the Prime Minister of Canada?" ===]`  
-`[=== Info Banner: Similarity score below threshold. Fallback to Web Search... ===]`  
+`[=== Info Banner: Context insufficient. Fallback to Web Search... ===]`  
 `[=== Chat Bubble (AI): "The Prime Minister of Canada is Mark Carney..." ===]`  
-`[=== Source Tag: 🌐 Web Search | Score: 0.1050 ===]`
+`[=== Source Tag: 🌐 Web Search | Score: 0.0914 ===]`
+
+---
+
+## 🔮 Future Improvements
+- **Multi-Document RAG**: Enable querying across multiple uploaded PDFs simultaneously.
+- **Custom System Instructions**: Let users configure system prompts directly in the Streamlit UI.
+- **Document Formats**: Extend support to include `.txt`, `.docx`, and `.csv` files.
+- **Offline Mode**: Add support for local vector search and LLMs via Ollama.
+
+---
+
+## 📄 License
+Distributed under the MIT License. See `LICENSE` for more information.
