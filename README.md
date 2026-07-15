@@ -1,6 +1,6 @@
-# ContextLens 🔍 — Document QA Assistant (RAG)
+# ContextLens 🔍 — Website FAQ / Support Chatbot (RAG)
 
-ContextLens is a modern, lightweight Document Question Answering Assistant that uses **Retrieval-Augmented Generation (RAG)** with a **Web Search Fallback**. Built entirely in Python using **Streamlit** and **Groq**, it behaves like a lightweight, local ChatGPT for your documents.
+ContextLens is a modern, lightweight Website FAQ / Support Chatbot that uses **Retrieval-Augmented Generation (RAG)**. Built entirely in Python using **Streamlit** and **Groq**, it behaves like a chatbot for answering queries based on uploaded company documentation.
 
 ---
 
@@ -12,9 +12,9 @@ ContextLens is a modern, lightweight Document Question Answering Assistant that 
 - **SentenceTransformer Embeddings**: High-quality dense vector representations using `all-MiniLM-L6-v2`.
 - **Groq LLM Integration**: Fast inference with the Groq client (`openai/gpt-oss-20b` or custom models).
 - **Intelligent RAG Routing**: Instead of relying purely on brittle thresholds, ContextLens uses an LLM-based sufficiency auditor to evaluate context before answering.
-- **Intelligent Web Fallback**: Uses a time-bounded (10s) DuckDuckGo search fallback if the document does not contain the answer.
+- **Support Chatbot Fallback**: Returns a friendly "I don't know" message if the document context is insufficient, rather than guessing or searching the web.
 - **Chat History**: Preserves conversation history locally across session reruns using `st.session_state`.
-- **Debug Mode**: Toggleable metrics panel in the sidebar showing document analysis stats, top search hits, scores, and execution times (embedding, search, routing, Groq, and web search).
+- **Debug Mode**: Toggleable metrics panel in the sidebar showing document analysis stats, top search hits, scores, and execution times (embedding, search, routing, and Groq).
 
 ---
 
@@ -24,7 +24,6 @@ ContextLens is a modern, lightweight Document Question Answering Assistant that 
 - **Embeddings**: [sentence-transformers](https://huggingface.co/sentence-transformers) (`all-MiniLM-L6-v2` model, cached locally).
 - **Vector DB**: [faiss-cpu](https://github.com/facebookresearch/faiss) for efficient dense vector similarity search.
 - **PDF Extraction**: [pypdf](https://pypi.org/project/pypdf/) for reading and cleaning document text.
-- **Fallback Search**: [duckduckgo-search](https://pypi.org/project/duckduckgo-search/) for fallback queries.
 
 ---
 
@@ -34,7 +33,6 @@ ContextLens is a modern, lightweight Document Question Answering Assistant that 
 DocQuery-AI/
 ├── app.py           # Streamlit application (UI layout, state management, chat interaction)
 ├── rag.py           # Core RAG pipeline (index build, save/load persistence, Groq API client)
-├── web_search.py    # Fallback search query executor using DuckDuckGo
 ├── utils.py         # PDF text extraction and text chunking
 ├── requirements.txt # Project Python package dependencies
 ├── .env.example     # Configuration template for API keys and models
@@ -63,10 +61,9 @@ graph TD
     L --> M[Ask Groq: Is context sufficient to answer?]
     M --> N{Decision YES?}
     N -->|Yes| O[Generate answer using Document Context]
-    N -->|No / Index empty| P[Perform DuckDuckGo Web Search]
-    P --> Q[Generate answer summarizing Web Results]
+    N -->|No / Index empty| P[Return 'I don't know' fallback message]
     O --> R[Add to Chat History st.session_state]
-    Q --> R
+    P --> R
     R --> J
 ```
 
@@ -80,7 +77,7 @@ graph TD
 4. **LLM Context Evaluation**: The top 3 chunks are sent to the Groq LLM with an audit instruction. The LLM performs a sufficiency analysis and answers either `YES` or `NO` on whether the context is sufficient to answer the question.
 5. **Answer Generation**:
    - If the audit returns **`YES`**, the LLM answers the query based **only** on the document chunks.
-   - If the audit returns **`NO`**, the system triggers a DuckDuckGo web search, gathers search snippets, and asks the LLM to summarize the results.
+   - If the audit returns **`NO`** (or the index is empty), the chatbot returns: *"I don't know. I couldn't find that information in the uploaded company documentation."*
 
 ---
 
@@ -146,11 +143,9 @@ Open `http://localhost:8501` in your browser.
 `[=== Chat Bubble (AI): "FAISS is a library for similarity search..." ===]`  
 `[=== Source Tag: 📄 Document | Score: 0.2084 ===]`
 
-### 3. Web Search Fallback (Web Source)
+### 3. Chatbot Fallback (No Document Source)
 `[=== Chat Bubble (User): "Who is the Prime Minister of Canada?" ===]`  
-`[=== Info Banner: Context insufficient. Fallback to Web Search... ===]`  
-`[=== Chat Bubble (AI): "The Prime Minister of Canada is Mark Carney..." ===]`  
-`[=== Source Tag: 🌐 Web Search | Score: 0.0914 ===]`
+`[=== Chat Bubble (AI): "I don't know. I couldn't find that information in the uploaded company documentation." ===]`
 
 ---
 

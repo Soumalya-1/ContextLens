@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 from groq import Groq
 
 from utils import extract_text_from_pdf, split_text
-from web_search import search_web
 from rag import (
     load_embedder,
     build_faiss_index,
@@ -90,7 +89,7 @@ os.makedirs(INDEX_DIR, exist_ok=True)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "debug_times" not in st.session_state:
-    st.session_state.debug_times = {"embedding": 0.0, "faiss_search": 0.0, "rag_routing": 0.0, "groq_api": 0.0, "web_search": 0.0}
+    st.session_state.debug_times = {"embedding": 0.0, "faiss_search": 0.0, "rag_routing": 0.0, "groq_api": 0.0}
 if "last_score" not in st.session_state:
     st.session_state.last_score = 0.0
 if "last_retrieved_chunks" not in st.session_state:
@@ -148,7 +147,7 @@ def populate_debug_doc_info(pdf_path, index, chunks):
 
 # Sidebar Layout
 st.sidebar.markdown("<h2 style='margin-bottom: 0px;'>ContextLens 🔍</h2>", unsafe_allow_html=True)
-st.sidebar.caption("Document QA Assistant with Web Fallback")
+st.sidebar.caption("Website FAQ / Support Chatbot")
 st.sidebar.markdown("---")
 
 st.sidebar.markdown("### 📤 Upload Document")
@@ -300,7 +299,6 @@ if debug_mode:
     st.sidebar.write(f"- FAISS search: `{times.get('faiss_search', 0.0):.4f}s`")
     st.sidebar.write(f"- RAG Routing Audit: `{times.get('rag_routing', 0.0):.4f}s`")
     st.sidebar.write(f"- Groq API: `{times.get('groq_api', 0.0):.4f}s`")
-    st.sidebar.write(f"- Web search: `{times.get('web_search', 0.0):.4f}s`")
     st.sidebar.write(f"**Last Router Decision**: `{st.session_state.get('last_router_decision', 'N/A')}`")
     st.sidebar.write(f"**Last Similarity Score**: `{st.session_state.get('last_score', 0.0):.4f}`")
     
@@ -376,7 +374,6 @@ if query:
         st.session_state.debug_times["faiss_search"] = 0.0
         st.session_state.debug_times["rag_routing"] = 0.0
         st.session_state.debug_times["groq_api"] = 0.0
-        st.session_state.debug_times["web_search"] = 0.0
         
         print("\n=== PIPELINE RUN ===")
         # We will use st.status to show the pipeline steps
@@ -473,36 +470,12 @@ if query:
                     else:
                         retrieved_chunks = []  # Clear to force fallback below
                 
-                # RAG or Web Fallback
+                # Check if we have retrieved chunks/answer
                 if not retrieved_chunks:
-                    status_box.write("🌐 **[STEP 5c] Context insufficient or index empty**. Falling back to Web Search.")
-                    print("[STEP 5c] Below threshold / context insufficient, fallback to Web Search.")
-                    
-                    # [STEP 7] Running web search
-                    status_box.write("🕸️ **[STEP 7] Running web search** via DuckDuckGo fallback...")
-                    print(f"[STEP 7] Running web search for query: {query}")
-                    
-                    start_t = time.time()
-                    web_results = search_web(query)
-                    st.session_state.debug_times["web_search"] = time.time() - start_t
-                    
-                    if web_results and not web_results.startswith("Error:"):
-                        source = "🌐 Web Search"
-                        system_instruction = "Summarize the following web search results into a concise, factual answer. Mention if there are conflicting sources."
-                        prompt = f"Web Search Results:\n{web_results}\n\nQuestion: {query}"
-                        
-                        status_box.write("🤖 **[STEP 7a] Calling Groq** to summarize web results...")
-                        print("[STEP 7a] Calling Groq for web results summarization...")
-                        
-                        start_t = time.time()
-                        answer = generate_groq_answer(groq_client, prompt, system_instruction, model_name=groq_model)
-                        st.session_state.debug_times["groq_api"] = time.time() - start_t
-                    elif web_results.startswith("Error:"):
-                        answer = f"Error: Web search timed out or failed. ({web_results})"
-                        source = "None"
-                    else:
-                        answer = "I couldn't find enough information in either the uploaded document or on the web."
-                        source = "None"
+                    status_box.write("❌ **[STEP 5c] Context insufficient or index empty**. No answer found in document.")
+                    print("[STEP 5c] Below threshold / context insufficient, returning fallback response.")
+                    answer = "I don't know. I couldn't find that information in the uploaded company documentation."
+                    source = "None"
                         
                 # [STEP 8] Returning response
                 status_box.write("📤 **[STEP 8] Returning response** to user interface.")
