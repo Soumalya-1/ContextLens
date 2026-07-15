@@ -6,9 +6,10 @@ ContextLens is a modern, lightweight Website FAQ / Support Chatbot that uses **R
 
 ## 🚀 Key Features
 
-- **Streamlit Interface**: Clean, ChatGPT-like conversation layout built for GitHub portfolio presentation.
+- **Visitor / Admin Mode Selection**: A simple toggle in the sidebar switches the interface between **Visitor Mode** (clean chatbot support experience) and **Admin Mode** (full document management dashboard).
+- **Admin Dashboard**: Organizes uploads, uploaded file statuses, statistics, and index rebuild workflows inside clean Streamlit expanders.
 - **Multi-Document Support**: Upload and manage multiple PDF files simultaneously, consolidating their contents into a single unified knowledge base.
-- **Knowledge Base Management**: View, add, and delete documents in real-time from the sidebar, with stats on total chunks, docs, and last indexed time.
+- **Knowledge Base Management**: Add and delete documents in real-time, displaying file names, sizes, and rebuilding indices automatically.
 - **FAISS Vector Search**: Fast similarity search over all documents in the knowledge base using `IndexFlatIP` indexing.
 - **SentenceTransformer Embeddings**: High-quality dense vector representations using `all-MiniLM-L6-v2`.
 - **Groq LLM Integration**: Fast inference with the Groq client (`openai/gpt-oss-20b` or custom models).
@@ -78,13 +79,18 @@ graph TD
 
 ## ⚙️ How It Works
 
-1. **Upload PDF**: PDF documents uploaded via the Streamlit interface are stored under `data/documents/`.
+1. **Upload PDF & Document Verification**: Admin uploads PDF documents via the **Admin Dashboard** (expanders). If a duplicate is uploaded, the dashboard warns the admin and skips it unless the "Overwrite existing files" option is checked. All PDFs are saved under `data/documents/`.
 2. **Build Embeddings & Persistence**: The app parses the document text, splits it into overlapping 500-character chunks, embeds them using `all-MiniLM-L6-v2`, builds a FAISS index, and persists both index and chunks to `data/index/` for sub-second retrieval on future sessions.
 3. **FAISS Retrieval**: When a query is asked, the system retrieves the **top 3** most similar chunks from the FAISS index (using a threshold of `-1.0` to ensure candidates are retrieved).
 4. **LLM Context Evaluation**: The top 3 chunks are sent to the Groq LLM with an audit instruction. The LLM performs a sufficiency analysis and answers either `YES` or `NO` on whether the context is sufficient to answer the question.
 5. **Answer Generation**:
-   - If the audit returns **`YES`**, the LLM answers the query based **only** on the document chunks.
-   - If the audit returns **`NO`** (or the index is empty), the chatbot returns: *"I don't know. I couldn't find that information in the uploaded company documentation."*
+    - If the audit returns **`YES`**, the LLM answers the query based **only** on the document chunks.
+    - If the audit returns **`NO`** (or the index is empty), the chatbot returns: *"I don't know. I couldn't find that information in the uploaded company documentation."*
+
+### 🛠️ Admin Dashboard Workflow
+- **Upload**: Admin can select multiple PDF files, toggle overwrite capability, and see real-time upload progress.
+- **Delete**: Admin can choose a specific file to delete. Deleting a document automatically triggers a background FAISS index rebuild.
+- **Rebuild**: A manual button allows regenerating vector embeddings and rebuilding the unified FAISS database.
 
 ---
 
@@ -142,8 +148,11 @@ Open `http://localhost:8501` in your browser.
 
 *Below are placeholder regions representing ContextLens in action:*
 
-### 1. Document Upload & Selection (Sidebar)
-`[=== Sidebar: Upload a PDF / Dropdown List of Available PDFs ===]`
+### 1. Mode Toggle (Sidebar)
+`[=== Sidebar: 👤 Mode (Visitor / Admin) Radio Buttons ===]`
+
+### 2. Admin Dashboard (Admin Mode Sidebar)
+`[=== Expanders: 📂 Upload Documents | 📚 Uploaded Documents | 📊 Knowledge Base Stats | 🛠️ Maintenance ===]`
 
 ### 2. Interactive Document QA (Document Source)
 `[=== Chat Bubble (User): "What is FAISS?" ===]`  

@@ -102,6 +102,8 @@ if "debug_doc_info" not in st.session_state:
     st.session_state.debug_doc_info = {}
 if "last_uploaded_processed" not in st.session_state:
     st.session_state.last_uploaded_processed = []
+if "admin_messages" not in st.session_state:
+    st.session_state.admin_messages = []
 
 # Validate API Key
 if not groq_api_key or groq_api_key == "your_key_here":
@@ -234,13 +236,38 @@ def rebuild_knowledge_base(force: bool = False):
                 except Exception:
                     pass
 
+def get_file_size_str(filepath: str) -> str:
+    try:
+        size_bytes = os.path.getsize(filepath)
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        else:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+    except Exception:
+        return "N/A"
+
+def display_admin_messages():
+    if "admin_messages" in st.session_state and st.session_state.admin_messages:
+        for msg in st.session_state.admin_messages:
+            if msg["type"] == "success":
+                st.sidebar.success(msg["text"])
+            elif msg["type"] == "warning":
+                st.sidebar.warning(msg["text"])
+            elif msg["type"] == "error":
+                st.sidebar.error(msg["text"])
+        st.session_state.admin_messages = []
+
 def delete_document(pdf_name: str):
     pdf_path = os.path.join(DOCS_DIR, pdf_name)
+    success = False
     if os.path.exists(pdf_path):
         try:
             os.remove(pdf_path)
+            success = True
         except Exception as e:
-            st.sidebar.error(f"Failed to delete {pdf_name}: {e}")
+            st.session_state.admin_messages.append({"type": "error", "text": f"Failed to delete {pdf_name}: {e}"})
             
     cache_path = os.path.join(INDEX_DIR, "cache", f"{pdf_name}.chunks.json")
     if os.path.exists(cache_path):
@@ -250,6 +277,8 @@ def delete_document(pdf_name: str):
             print(f"Failed to delete cache file {cache_path}: {e}")
             
     rebuild_knowledge_base()
+    if success:
+        st.session_state.admin_messages.append({"type": "success", "text": f"✅ Document deleted."})
 
 def format_sources(retrieved_hits) -> str:
     citation_strings = []
@@ -300,149 +329,196 @@ if "index" not in st.session_state or "chunks" not in st.session_state:
         else:
             st.session_state.index = None
             st.session_state.chunks = []
+pdf_files = sorted([f for f in os.listdir(DOCS_DIR) if f.lower().endswith(".pdf")])
 
 # Sidebar Layout
 st.sidebar.markdown("<h2 style='margin-bottom: 0px;'>ContextLens 🔍</h2>", unsafe_allow_html=True)
 st.sidebar.caption("Website FAQ / Support Chatbot")
 st.sidebar.markdown("---")
 
-st.sidebar.markdown("### Knowledge Base")
-
-# Upload new files
-st.sidebar.markdown("#### 📤 Upload Documents")
-uploaded_files = st.sidebar.file_uploader(
-    "Upload PDF files", 
-    type=["pdf"], 
-    accept_multiple_files=True,
-    help="Upload one or multiple PDF documents to add them to the knowledge base."
+# Mode selection toggle
+mode = st.sidebar.radio(
+    "👤 Mode",
+    options=["Visitor", "Admin"],
+    index=0,
+    help="Select 'Visitor' to chat with the FAQ bot, or 'Admin' to manage documentation."
 )
-overwrite = st.sidebar.checkbox("Overwrite existing files", value=False, key="overwrite_files")
+st.sidebar.markdown("---")
 
-# Process uploaded files
-if uploaded_files:
-    uploaded_names = [f.name for f in uploaded_files]
-    last_processed = st.session_state.get("last_uploaded_processed", [])
+if mode == "Admin":
+    st.sidebar.markdown("### 🛠️ Admin Dashboard")
     
-    # Check if there is any difference between current uploads and last processed
-    if uploaded_names != last_processed:
-        new_files_uploaded = False
-        for uploaded_file in uploaded_files:
-            pdf_name = uploaded_file.name
-            pdf_path = os.path.join(DOCS_DIR, pdf_name)
-            file_exists = os.path.exists(pdf_path)
+    # Display any success / warning notifications from actions
+    display_admin_messages()
+    
+    # 1. Upload Documents Expander
+    with st.sidebar.expander("📂 Upload Documents", expanded=False):
+        uploaded_files = st.file_uploader(
+            "Upload PDF files", 
+            type=["pdf"], 
+            accept_multiple_files=True,
+            help="Upload one or multiple PDF documents to add them to the knowledge base.",
+            key="admin_pdf_uploader"
+        )
+        overwrite = st.checkbox("Overwrite existing files", value=False, key="overwrite_files")
+        
+        # Process uploaded files
+        if uploaded_files:
+            uploaded_names = [f.name for f in uploaded_files]
+            last_processed = st.session_state.get("last_uploaded_processed", [])
             
-            if file_exists and not overwrite:
-                continue
+            if uploaded_names != last_processed:
+                new_files_uploaded = False
+                skipped_files = []
+                uploaded_success_files = []
                 
-            try:
-                with open(pdf_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                # Delete cache for this file to ensure it's re-indexed
-                cache_path = os.path.join(INDEX_DIR, "cache", f"{pdf_name}.chunks.json")
-                if os.path.exists(cache_path):
+                for uploaded_file in uploaded_files:
+                    pdf_name = uploaded_file.name
+                    pdf_path = os.path.join(DOCS_DIR, pdf_name)
+                    file_exists = os.path.exists(pdf_path)
+                    
+                    if file_exists and not overwrite:
+                        skipped_files.append(pdf_name)
+                        continue
+                        
                     try:
-                        os.remove(cache_path)
-                    except Exception:
-                        pass
-                new_files_uploaded = True
-            except Exception as e:
-                st.sidebar.error(f"Failed to save {pdf_name}: {e}")
+                        with open(pdf_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        
+                        # Delete cache for this file to ensure it's re-indexed
+                        cache_path = os.path.join(INDEX_DIR, "cache", f"{pdf_name}.chunks.json")
+                        if os.path.exists(cache_path):
+                            try:
+                                os.remove(cache_path)
+                            except Exception:
+                                pass
+                        new_files_uploaded = True
+                        uploaded_success_files.append(pdf_name)
+                    except Exception as e:
+                        st.error(f"Failed to save {pdf_name}: {e}")
                 
-        st.session_state.last_uploaded_processed = uploaded_names
-        
-        if new_files_uploaded:
-            with st.spinner("Indexing new documents..."):
-                rebuild_knowledge_base()
-            st.rerun()
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("#### 📄 Uploaded Documents")
-
-# Get list of existing PDF files
-pdf_files = sorted([f for f in os.listdir(DOCS_DIR) if f.lower().endswith(".pdf")])
-
-if pdf_files:
-    for pdf in pdf_files:
-        col1, col2 = st.sidebar.columns([6, 1])
-        col1.write(f"📄 {pdf}")
-        if col2.button("🗑️", key=f"delete_{pdf}", help=f"Delete {pdf}"):
-            with st.spinner(f"Deleting {pdf} and rebuilding index..."):
-                delete_document(pdf)
-            st.rerun()
-else:
-    st.sidebar.info("No documents uploaded yet. Please upload a PDF to get started.")
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("#### 📊 Stats")
-metadata = load_kb_metadata()
-st.sidebar.write(f"📁 Total Documents: `{metadata.get('total_documents', 0)}`")
-st.sidebar.write(f"🧩 Total Chunks: `{metadata.get('total_chunks', 0)}`")
-st.sidebar.write(f"🕒 Last Indexed: `{metadata.get('last_indexed', 'N/A')}`")
-
-st.sidebar.markdown("---")
-# Rebuild button
-if st.sidebar.button("⚡ Rebuild Knowledge Base", use_container_width=True, help="Force regenerate embeddings and rebuild FAISS index from scratch"):
-    with st.spinner("Rebuilding knowledge base..."):
-        rebuild_knowledge_base(force=True)
-    st.sidebar.success("Knowledge base rebuilt successfully!")
-    st.rerun()
-
-st.sidebar.markdown("---")
-debug_mode = st.sidebar.checkbox("🐞 Debug Mode", value=False)
-
-# Sidebar Debug Information display
-if debug_mode:
-    st.sidebar.markdown("### 📄 Knowledge Base Debug Stats")
-    st.sidebar.write(f"- Uploaded Documents: `{len(pdf_files)}`")
-    st.sidebar.write(f"- Indexed Files: `{', '.join(pdf_files) if pdf_files else 'None'}`")
-    
-    total_chunks = len(st.session_state.get("chunks", []))
-    st.sidebar.write(f"- Total Chunks: `{total_chunks}`")
-    
-    if st.session_state.index:
-        st.sidebar.write(f"- FAISS dimension: `{st.session_state.index.d}`")
-        st.sidebar.write(f"- Total vectors stored: `{st.session_state.index.ntotal}`")
-        
-    st.sidebar.markdown("### 🔍 Last Retrieval Details")
-    retrieved_docs = []
-    retrieved_chunk_ids = []
-    top_hits_list = st.session_state.get("last_query_top_hits", [])
-    for hit in top_hits_list[:3]:  # Top 3 retrieved chunks
-        meta = hit.get("meta")
-        if isinstance(meta, dict):
-            retrieved_docs.append(meta.get("filename", "N/A"))
-            retrieved_chunk_ids.append(str(meta.get("chunk_id", "N/A")))
+                st.session_state.last_uploaded_processed = uploaded_names
+                
+                if skipped_files:
+                    st.session_state.admin_messages.append({
+                        "type": "warning", 
+                        "text": f"⚠️ Skipped duplicate(s): {', '.join(skipped_files)}. Enable 'Overwrite existing files' to replace them."
+                    })
+                if uploaded_success_files:
+                    st.session_state.admin_messages.append({
+                        "type": "success", 
+                        "text": f"✅ Uploaded successfully."
+                    })
+                
+                if new_files_uploaded:
+                    with st.spinner("Indexing new documents..."):
+                        rebuild_knowledge_base()
+                    st.rerun()
+                    
+    # 2. Uploaded Documents Expander
+    with st.sidebar.expander(f"📚 Uploaded Documents ({len(pdf_files)})", expanded=False):
+        if pdf_files:
+            st.markdown(f"**Total Documents:** `{len(pdf_files)}`")
+            for pdf in pdf_files:
+                pdf_path = os.path.join(DOCS_DIR, pdf)
+                size_str = get_file_size_str(pdf_path)
+                st.markdown(f"📄 **{pdf}** (`{size_str}`)")
         else:
-            retrieved_docs.append("Legacy/N/A")
-            retrieved_chunk_ids.append(str(hit.get("idx", "N/A")))
+            st.info("No documents uploaded yet.")
             
-    st.sidebar.write(f"- Retrieved Docs: `{', '.join(set(retrieved_docs)) if retrieved_docs else 'None'}`")
-    st.sidebar.write(f"- Retrieved Chunk IDs: `{', '.join(retrieved_chunk_ids) if retrieved_chunk_ids else 'None'}`")
-    
-    st.sidebar.markdown("### 🐞 Search Performance Metrics")
-    times = st.session_state.get("debug_times", {})
-    st.sidebar.write(f"- Embedding/Index Load: `{times.get('embedding', 0.0):.4f}s`")
-    st.sidebar.write(f"- FAISS search: `{times.get('faiss_search', 0.0):.4f}s`")
-    st.sidebar.write(f"- RAG Routing Audit: `{times.get('rag_routing', 0.0):.4f}s`")
-    st.sidebar.write(f"- Groq API: `{times.get('groq_api', 0.0):.4f}s`")
-    st.sidebar.write(f"**Last Router Decision**: `{st.session_state.get('last_router_decision', 'N/A')}`")
-    st.sidebar.write(f"**Last Similarity Score**: `{st.session_state.get('last_score', 0.0):.4f}`")
-    
-    with st.sidebar.expander("FAISS Top Search Hits", expanded=False):
-        if top_hits_list:
-            for hit in top_hits_list:
-                tag = "✅ TOP CHUNK" if hit["rank"] <= 3 else "ℹ️ EXTRA CHUNK"
-                st.caption(f"**Rank {hit['rank']}** (Score: `{hit['score']:.4f}`) - {tag}")
-                meta = hit.get("meta")
-                if isinstance(meta, dict):
-                    st.caption(f"Doc: `{meta.get('filename')}` | Chunk: `{meta.get('chunk_id')}` | Page: `{meta.get('page')}`")
-                else:
-                    st.caption(f"Chunk ID: `{hit['idx']}`")
-                st.text(hit["text"])
-                st.markdown("---")
+    # 3. Knowledge Base Statistics Expander
+    with st.sidebar.expander("📊 Knowledge Base Statistics", expanded=False):
+        metadata = load_kb_metadata()
+        st.markdown(f"📁 **Total Documents:** `{metadata.get('total_documents', len(pdf_files))}`")
+        st.markdown(f"🧩 **Total Chunks:** `{metadata.get('total_chunks', 0)}`")
+        st.markdown(f"🤖 **Embedding Model:** `all-MiniLM-L6-v2`")
+        st.markdown(f"🗄️ **Vector Database:** `FAISS`")
+        st.markdown(f"🕒 **Last Indexed:** `{metadata.get('last_indexed', 'N/A')}`")
+        
+    # 4. Maintenance Expander
+    with st.sidebar.expander("🛠️ Maintenance", expanded=False):
+        st.markdown("#### Delete Document")
+        if pdf_files:
+            doc_to_delete = st.selectbox(
+                "Select PDF to delete",
+                options=["Select a document..."] + pdf_files,
+                key="delete_doc_select"
+            )
+            if doc_to_delete != "Select a document...":
+                if st.button("🗑️ Delete Selected Document", use_container_width=True, type="secondary"):
+                    with st.spinner(f"Deleting {doc_to_delete}..."):
+                        delete_document(doc_to_delete)
+                    st.rerun()
         else:
-            st.caption("No queries run yet.")
+            st.info("No documents to delete.")
+            
+        st.markdown("---")
+        st.markdown("#### Index Maintenance")
+        if st.button("🔄 Rebuild Knowledge Base", use_container_width=True, help="Force rebuild the index"):
+            with st.spinner("Rebuilding knowledge base..."):
+                rebuild_knowledge_base(force=True)
+            st.session_state.admin_messages.append({"type": "success", "text": "✅ Knowledge base rebuilt."})
+            st.rerun()
+            
+    # Debug Mode toggle for admin
+    st.sidebar.markdown("---")
+    debug_mode = st.sidebar.checkbox("🐞 Debug Mode", value=False)
+    
+    # Sidebar Debug Information display
+    if debug_mode:
+        st.sidebar.markdown("### 📄 Knowledge Base Debug Stats")
+        st.sidebar.write(f"- Uploaded Documents: `{len(pdf_files)}`")
+        st.sidebar.write(f"- Indexed Files: `{', '.join(pdf_files) if pdf_files else 'None'}`")
+        
+        total_chunks = len(st.session_state.get("chunks", []))
+        st.sidebar.write(f"- Total Chunks: `{total_chunks}`")
+        
+        if st.session_state.index:
+            st.sidebar.write(f"- FAISS dimension: `{st.session_state.index.d}`")
+            st.sidebar.write(f"- Total vectors stored: `{st.session_state.index.ntotal}`")
+            
+        st.sidebar.markdown("### 🔍 Last Retrieval Details")
+        retrieved_docs = []
+        retrieved_chunk_ids = []
+        top_hits_list = st.session_state.get("last_query_top_hits", [])
+        for hit in top_hits_list[:3]:  # Top 3 retrieved chunks
+            meta = hit.get("meta")
+            if isinstance(meta, dict):
+                retrieved_docs.append(meta.get("filename", "N/A"))
+                retrieved_chunk_ids.append(str(meta.get("chunk_id", "N/A")))
+            else:
+                retrieved_docs.append("Legacy/N/A")
+                retrieved_chunk_ids.append(str(hit.get("idx", "N/A")))
+                
+        st.sidebar.write(f"- Retrieved Docs: `{', '.join(set(retrieved_docs)) if retrieved_docs else 'None'}`")
+        st.sidebar.write(f"- Retrieved Chunk IDs: `{', '.join(retrieved_chunk_ids) if retrieved_chunk_ids else 'None'}`")
+        
+        st.sidebar.markdown("### 🐞 Search Performance Metrics")
+        times = st.session_state.get("debug_times", {})
+        st.sidebar.write(f"- Embedding/Index Load: `{times.get('embedding', 0.0):.4f}s`")
+        st.sidebar.write(f"- FAISS search: `{times.get('faiss_search', 0.0):.4f}s`")
+        st.sidebar.write(f"- RAG Routing Audit: `{times.get('rag_routing', 0.0):.4f}s`")
+        st.sidebar.write(f"- Groq API: `{times.get('groq_api', 0.0):.4f}s`")
+        st.sidebar.write(f"**Last Router Decision**: `{st.session_state.get('last_router_decision', 'N/A')}`")
+        st.sidebar.write(f"**Last Similarity Score**: `{st.session_state.get('last_score', 0.0):.4f}`")
+        
+        with st.sidebar.expander("FAISS Top Search Hits", expanded=False):
+            if top_hits_list:
+                for hit in top_hits_list:
+                    tag = "✅ TOP CHUNK" if hit["rank"] <= 3 else "ℹ️ EXTRA CHUNK"
+                    st.caption(f"**Rank {hit['rank']}** (Score: `{hit['score']:.4f}`) - {tag}")
+                    meta = hit.get("meta")
+                    if isinstance(meta, dict):
+                        st.caption(f"Doc: `{meta.get('filename')}` | Chunk: `{meta.get('chunk_id')}` | Page: `{meta.get('page')}`")
+                    else:
+                        st.caption(f"Chunk ID: `{hit['idx']}`")
+                    st.text(hit["text"])
+                    st.markdown("---")
+            else:
+                st.caption("No queries run yet.")
+else:
+    # Visitor mode: No debug mode
+    debug_mode = False
 
 # Main UI Area
 st.markdown("<h1 class='title-text'>ContextLens 🔍</h1>", unsafe_allow_html=True)
@@ -478,7 +554,10 @@ if st.session_state.messages:
 # Disable input if no documents are loaded
 chat_disabled = (len(pdf_files) == 0 or st.session_state.index is None)
 if chat_disabled:
-    st.warning("⚠️ **Please upload one or more PDFs to the sidebar to start asking questions.**")
+    if mode == "Admin":
+        st.warning("⚠️ **Please upload one or more PDFs to the sidebar to start asking questions.**")
+    else:
+        st.warning("⚠️ **Support Chatbot is currently offline (no documents uploaded). Please contact the administrator.**")
 
 query = st.chat_input("Ask a question about the uploaded documents...", disabled=chat_disabled)
 
