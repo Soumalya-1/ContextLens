@@ -3,7 +3,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from groq import Groq
 
-from utils import extract_text_from_pdf, split_text
+from utils import extract_text_from_pdf, split_text, extract_and_chunk_pdf
 from web_search import search_web
 from rag import (
     load_embedder,
@@ -102,7 +102,7 @@ if "last_router_decision" not in st.session_state:
 if "debug_doc_info" not in st.session_state:
     st.session_state.debug_doc_info = {}
 if "last_uploaded_processed" not in st.session_state:
-    st.session_state.last_uploaded_processed = None
+    st.session_state.last_uploaded_processed = []
 
 # Validate API Key
 if not groq_api_key or groq_api_key == "your_key_here":
@@ -122,178 +122,305 @@ def get_embedder():
     return load_embedder()
 
 # Helper function to gather and print document stats for Debug Mode
-def populate_debug_doc_info(pdf_path, index, chunks):
+def populate_debug_doc_info(index, chunks):
     try:
-        raw_text = extract_text_from_pdf(pdf_path)
+        avg_sz = sum(len(c["text"] if isinstance(c, dict) else c) for c in chunks) / len(chunks) if chunks else 0
         st.session_state.debug_doc_info = {
-            "text_len": len(raw_text),
-            "first_500": raw_text[:500],
             "num_chunks": len(chunks),
-            "avg_chunk_size": sum(len(c) for c in chunks) / len(chunks) if chunks else 0,
-            "first_chunk": chunks[0] if chunks else "",
+            "avg_chunk_size": avg_sz,
             "dimension": index.d if index else 0,
             "total_vectors": index.ntotal if index else 0
         }
         # Print diagnostic stats to terminal
         print("\n=== [DIAGNOSTIC PIPELINE STATE: INDEX] ===")
-        print(f"1. Text Extraction: length = {len(raw_text)} characters")
-        print(f"   First 500 characters:\n{raw_text[:500]}")
-        print(f"2. Chunking: number of chunks = {len(chunks)}, average chunk size = {st.session_state.debug_doc_info['avg_chunk_size']:.2f}")
-        print(f"   First chunk:\n{st.session_state.debug_doc_info['first_chunk']}")
-        print(f"3. Embeddings: dimension = {index.d if index else 0}, vectors = {index.ntotal if index else 0}")
-        print(f"4. FAISS: total vectors stored = {index.ntotal if index else 0}")
+        print(f"1. Chunking: number of chunks = {len(chunks)}, average chunk size = {avg_sz:.2f}")
+        print(f"2. Embeddings: dimension = {index.d if index else 0}, vectors = {index.ntotal if index else 0}")
+        print(f"3. FAISS: total vectors stored = {index.ntotal if index else 0}")
         print("==========================================\n")
     except Exception as e:
         print(f"[populate_debug_doc_info Error]: {e}")
+
+def load_kb_metadata():
+    import json
+    meta_path = os.path.join(INDEX_DIR, "kb.meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"last_indexed": "N/A", "total_documents": 0, "total_chunks": 0}
+
+def rebuild_knowledge_base(force: bool = False):
+    import time
+    from datetime import datetime
+    import json
+    
+    os.makedirs(os.path.join(INDEX_DIR, "cache"), exist_ok=True)
+    pdf_files = sorted([f for f in os.listdir(DOCS_DIR) if f.lower().endswith(".pdf")])
+    
+    if force:
+        cache_dir = os.path.join(INDEX_DIR, "cache")
+        if os.path.exists(cache_dir):
+            for f in os.listdir(cache_dir):
+                if f.endswith(".chunks.json"):
+                    try:
+                        os.remove(os.path.join(cache_dir, f))
+                    except Exception as e:
+                        print(f"Failed to delete cache file {f}: {e}")
+                        
+    all_chunks = []
+    embedder = get_embedder()
+    
+    for pdf in pdf_files:
+        pdf_path = os.path.join(DOCS_DIR, pdf)
+        cache_path = os.path.join(INDEX_DIR, "cache", f"{pdf}.chunks.json")
+        
+        if not os.path.exists(cache_path):
+            try:
+                file_chunks = extract_and_chunk_pdf(pdf_path)
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    json.dump(file_chunks, f, ensure_ascii=False)
+            except Exception as e:
+                print(f"Error processing {pdf}: {e}")
+                continue
+        else:
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    file_chunks = json.load(f)
+            except Exception as e:
+                print(f"Error reading cache for {pdf}: {e}")
+                try:
+                    file_chunks = extract_and_chunk_pdf(pdf_path)
+                    with open(cache_path, "w", encoding="utf-8") as f:
+                        json.dump(file_chunks, f, ensure_ascii=False)
+                except Exception as e2:
+                    print(f"Failed to reprocess {pdf}: {e2}")
+                    continue
+                    
+        all_chunks.extend(file_chunks)
+        
+    if all_chunks:
+        try:
+            index_path = os.path.join(INDEX_DIR, "kb.index")
+            chunks_path = os.path.join(INDEX_DIR, "kb.chunks.json")
+            
+            index, indexed_chunks = build_faiss_index(all_chunks, embedder)
+            save_faiss_index(index, indexed_chunks, index_path, chunks_path)
+            
+            meta_path = os.path.join(INDEX_DIR, "kb.meta.json")
+            meta_data = {
+                "last_indexed": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "total_documents": len(pdf_files),
+                "total_chunks": len(all_chunks)
+            }
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta_data, f, ensure_ascii=False)
+                
+            st.session_state.index = index
+            st.session_state.chunks = indexed_chunks
+            populate_debug_doc_info(index, indexed_chunks)
+        except Exception as e:
+            print(f"Error building FAISS index: {e}")
+    else:
+        st.session_state.index = None
+        st.session_state.chunks = []
+        index_path = os.path.join(INDEX_DIR, "kb.index")
+        chunks_path = os.path.join(INDEX_DIR, "kb.chunks.json")
+        meta_path = os.path.join(INDEX_DIR, "kb.meta.json")
+        for p in [index_path, chunks_path, meta_path]:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
+def delete_document(pdf_name: str):
+    pdf_path = os.path.join(DOCS_DIR, pdf_name)
+    if os.path.exists(pdf_path):
+        try:
+            os.remove(pdf_path)
+        except Exception as e:
+            st.sidebar.error(f"Failed to delete {pdf_name}: {e}")
+            
+    cache_path = os.path.join(INDEX_DIR, "cache", f"{pdf_name}.chunks.json")
+    if os.path.exists(cache_path):
+        try:
+            os.remove(cache_path)
+        except Exception as e:
+            print(f"Failed to delete cache file {cache_path}: {e}")
+            
+    rebuild_knowledge_base()
+
+def format_sources(retrieved_hits) -> str:
+    citation_strings = []
+    seen = set()
+    for hit in retrieved_hits:
+        meta = hit.get("meta")
+        if isinstance(meta, dict):
+            filename = meta.get("filename", "N/A")
+            chunk_id = meta.get("chunk_id", "N/A")
+            page = meta.get("page")
+            
+            key = (filename, chunk_id, page)
+            if key in seen:
+                continue
+            seen.add(key)
+            
+            cit = f"Source:\nDocument: {filename}\nChunk: {chunk_id}"
+            if page is not None:
+                cit += f"\nPage: {page}"
+            citation_strings.append(cit)
+        elif isinstance(hit, dict) and "text" in hit:
+            doc_name = st.session_state.get("active_doc", "N/A")
+            idx = hit.get("idx", "N/A")
+            cit = f"Source:\nDocument: {doc_name}\nChunk: {idx}"
+            citation_strings.append(cit)
+            
+    return "\n\n".join(citation_strings)
+
+# Startup/initialization of the KB index
+index_path = os.path.join(INDEX_DIR, "kb.index")
+chunks_path = os.path.join(INDEX_DIR, "kb.chunks.json")
+
+# Determine if we need to load or initialize the index
+if "index" not in st.session_state or "chunks" not in st.session_state:
+    if os.path.exists(index_path) and os.path.exists(chunks_path):
+        try:
+            index, chunks = load_faiss_index(index_path, chunks_path)
+            st.session_state.index = index
+            st.session_state.chunks = chunks
+            populate_debug_doc_info(index, chunks)
+        except Exception as e:
+            print(f"Failed to load FAISS index on startup: {e}")
+            rebuild_knowledge_base()
+    else:
+        pdf_files = sorted([f for f in os.listdir(DOCS_DIR) if f.lower().endswith(".pdf")])
+        if pdf_files:
+            rebuild_knowledge_base()
+        else:
+            st.session_state.index = None
+            st.session_state.chunks = []
 
 # Sidebar Layout
 st.sidebar.markdown("<h2 style='margin-bottom: 0px;'>ContextLens 🔍</h2>", unsafe_allow_html=True)
 st.sidebar.caption("Document QA Assistant with Web Fallback")
 st.sidebar.markdown("---")
 
-st.sidebar.markdown("### 📤 Upload Document")
-uploaded_file = st.sidebar.file_uploader("Upload a new PDF file", type=["pdf"])
+st.sidebar.markdown("### Knowledge Base")
 
-if uploaded_file is not None:
-    pdf_name = uploaded_file.name
-    # Save and update active doc only if we haven't processed this specific file upload yet
-    if st.session_state.get("last_uploaded_processed") != pdf_name:
-        pdf_path = os.path.join(DOCS_DIR, pdf_name)
-        file_exists = os.path.exists(pdf_path)
+# Upload new files
+st.sidebar.markdown("#### 📤 Upload Documents")
+uploaded_files = st.sidebar.file_uploader(
+    "Upload PDF files", 
+    type=["pdf"], 
+    accept_multiple_files=True,
+    help="Upload one or multiple PDF documents to add them to the knowledge base."
+)
+overwrite = st.sidebar.checkbox("Overwrite existing files", value=False, key="overwrite_files")
+
+# Process uploaded files
+if uploaded_files:
+    uploaded_names = [f.name for f in uploaded_files]
+    last_processed = st.session_state.get("last_uploaded_processed", [])
+    
+    # Check if there is any difference between current uploads and last processed
+    if uploaded_names != last_processed:
+        new_files_uploaded = False
+        for uploaded_file in uploaded_files:
+            pdf_name = uploaded_file.name
+            pdf_path = os.path.join(DOCS_DIR, pdf_name)
+            file_exists = os.path.exists(pdf_path)
+            
+            if file_exists and not overwrite:
+                continue
+                
+            try:
+                with open(pdf_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                # Delete cache for this file to ensure it's re-indexed
+                cache_path = os.path.join(INDEX_DIR, "cache", f"{pdf_name}.chunks.json")
+                if os.path.exists(cache_path):
+                    try:
+                        os.remove(cache_path)
+                    except Exception:
+                        pass
+                new_files_uploaded = True
+            except Exception as e:
+                st.sidebar.error(f"Failed to save {pdf_name}: {e}")
+                
+        st.session_state.last_uploaded_processed = uploaded_names
         
-        try:
-            with open(pdf_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-                
-            if file_exists:
-                st.sidebar.info(f"🔄 Overwrote existing document: {pdf_name}")
-            else:
-                st.sidebar.success(f"✅ Saved new document: {pdf_name}")
-                
-            st.session_state.last_uploaded_processed = pdf_name
-            st.session_state.active_doc = pdf_name
-            st.session_state.loaded_doc_name = None  # Force reload/reindex
+        if new_files_uploaded:
+            with st.spinner("Indexing new documents..."):
+                rebuild_knowledge_base()
             st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"Failed to write uploaded file: {e}")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📄 Select Document")
+st.sidebar.markdown("#### 📄 Uploaded Documents")
 
 # Get list of existing PDF files
 pdf_files = sorted([f for f in os.listdir(DOCS_DIR) if f.lower().endswith(".pdf")])
 
-# Initialize active_doc if not set but files exist
-if "active_doc" not in st.session_state:
-    if pdf_files:
-        st.session_state.active_doc = pdf_files[0]
-    else:
-        st.session_state.active_doc = None
-
 if pdf_files:
-    # Set selectbox default index based on active_doc
-    default_idx = 0
-    if st.session_state.active_doc in pdf_files:
-        default_idx = pdf_files.index(st.session_state.active_doc)
-        
-    selected_pdf = st.sidebar.selectbox(
-        "Available PDFs",
-        options=pdf_files,
-        index=default_idx,
-        key="active_doc_selector"
-    )
-    
-    # Update active doc state if selectbox changes
-    if st.session_state.active_doc != selected_pdf:
-        st.session_state.active_doc = selected_pdf
-        st.session_state.loaded_doc_name = None  # Force reload/reindex
-        st.rerun()
+    for pdf in pdf_files:
+        col1, col2 = st.sidebar.columns([6, 1])
+        col1.write(f"📄 {pdf}")
+        if col2.button("🗑️", key=f"delete_{pdf}", help=f"Delete {pdf}"):
+            with st.spinner(f"Deleting {pdf} and rebuilding index..."):
+                delete_document(pdf)
+            st.rerun()
 else:
     st.sidebar.info("No documents uploaded yet. Please upload a PDF to get started.")
-    st.session_state.active_doc = None
 
-# Sidebar Debug Option
+st.sidebar.markdown("---")
+st.sidebar.markdown("#### 📊 Stats")
+metadata = load_kb_metadata()
+st.sidebar.write(f"📁 Total Documents: `{metadata.get('total_documents', 0)}`")
+st.sidebar.write(f"🧩 Total Chunks: `{metadata.get('total_chunks', 0)}`")
+st.sidebar.write(f"🕒 Last Indexed: `{metadata.get('last_indexed', 'N/A')}`")
+
+st.sidebar.markdown("---")
+# Rebuild button
+if st.sidebar.button("⚡ Rebuild Knowledge Base", use_container_width=True, help="Force regenerate embeddings and rebuild FAISS index from scratch"):
+    with st.spinner("Rebuilding knowledge base..."):
+        rebuild_knowledge_base(force=True)
+    st.sidebar.success("Knowledge base rebuilt successfully!")
+    st.rerun()
+
 st.sidebar.markdown("---")
 debug_mode = st.sidebar.checkbox("🐞 Debug Mode", value=False)
 
-# Index processing for the selected document
-active_doc = st.session_state.get("active_doc")
-
-if active_doc:
-    pdf_path = os.path.join(DOCS_DIR, active_doc)
-    index_path = os.path.join(INDEX_DIR, f"{active_doc}.index")
-    chunks_path = os.path.join(INDEX_DIR, f"{active_doc}.chunks.json")
-    
-    # If the index is already built on disk, load it
-    if os.path.exists(index_path) and os.path.exists(chunks_path):
-        if st.session_state.get("loaded_doc_name") != active_doc:
-            with st.spinner(f"Loading search index for {active_doc}..."):
-                import time
-                start_t = time.time()
-                try:
-                    index, chunks = load_faiss_index(index_path, chunks_path)
-                    st.session_state.index = index
-                    st.session_state.chunks = chunks
-                    st.session_state.loaded_doc_name = active_doc
-                    st.session_state.debug_times["embedding"] = time.time() - start_t
-                    populate_debug_doc_info(pdf_path, index, chunks)
-                except Exception as e:
-                    st.sidebar.error(f"Error loading index: {e}. Rebuilding...")
-                    st.session_state.loaded_doc_name = None
-                    
-    # Rebuild index if missing or failed to load
-    if st.session_state.get("loaded_doc_name") != active_doc:
-        with st.spinner(f"Analyzing and indexing {active_doc}..."):
-            import time
-            start_t = time.time()
-            try:
-                # Extract text
-                raw_text = extract_text_from_pdf(pdf_path)
-                if not raw_text.strip():
-                    st.error(f"❌ **Error**: No readable text could be extracted from '{active_doc}'.")
-                    st.session_state.active_doc = None
-                    st.session_state.index = None
-                    st.session_state.chunks = None
-                    st.stop()
-                
-                # Split text into overlapping chunks
-                chunks = split_text(raw_text, chunk_size=500, chunk_overlap=100)
-                
-                # Initialize embedder and build FAISS index
-                embedder = get_embedder()
-                index, indexed_chunks = build_faiss_index(chunks, embedder)
-                
-                # Save index and metadata
-                save_faiss_index(index, indexed_chunks, index_path, chunks_path)
-                
-                st.session_state.index = index
-                st.session_state.chunks = indexed_chunks
-                st.session_state.loaded_doc_name = active_doc
-                st.session_state.debug_times["embedding"] = time.time() - start_t
-                populate_debug_doc_info(pdf_path, index, indexed_chunks)
-                st.sidebar.success(f"⚡ Indexed {active_doc} successfully!")
-            except Exception as e:
-                import traceback
-                st.error(f"❌ **Failed to process PDF**: {e}")
-                st.text(traceback.format_exc())
-                st.session_state.active_doc = None
-                st.session_state.index = None
-                st.session_state.chunks = None
-                st.stop()
-
 # Sidebar Debug Information display
 if debug_mode:
-    st.sidebar.markdown("### 📄 Document Analysis Stats")
-    doc_info = st.session_state.get("debug_doc_info", {})
-    if doc_info:
-        st.sidebar.write(f"- Extracted text length: `{doc_info.get('text_len', 0)}` chars")
-        st.sidebar.write(f"- Number of chunks: `{doc_info.get('num_chunks', 0)}`")
-        st.sidebar.write(f"- Average chunk size: `{doc_info.get('avg_chunk_size', 0.0):.2f}` chars")
-        st.sidebar.write(f"- FAISS dimension: `{doc_info.get('dimension', 0)}`")
-        st.sidebar.write(f"- Total vectors stored: `{doc_info.get('total_vectors', 0)}`")
-        with st.sidebar.expander("First Chunk Preview", expanded=False):
-            st.text(doc_info.get("first_chunk", ""))
+    st.sidebar.markdown("### 📄 Knowledge Base Debug Stats")
+    st.sidebar.write(f"- Uploaded Documents: `{len(pdf_files)}`")
+    st.sidebar.write(f"- Indexed Files: `{', '.join(pdf_files) if pdf_files else 'None'}`")
+    
+    total_chunks = len(st.session_state.get("chunks", []))
+    st.sidebar.write(f"- Total Chunks: `{total_chunks}`")
+    
+    if st.session_state.index:
+        st.sidebar.write(f"- FAISS dimension: `{st.session_state.index.d}`")
+        st.sidebar.write(f"- Total vectors stored: `{st.session_state.index.ntotal}`")
+        
+    st.sidebar.markdown("### 🔍 Last Retrieval Details")
+    retrieved_docs = []
+    retrieved_chunk_ids = []
+    top_hits_list = st.session_state.get("last_query_top_hits", [])
+    for hit in top_hits_list[:3]:  # Top 3 retrieved chunks
+        meta = hit.get("meta")
+        if isinstance(meta, dict):
+            retrieved_docs.append(meta.get("filename", "N/A"))
+            retrieved_chunk_ids.append(str(meta.get("chunk_id", "N/A")))
+        else:
+            retrieved_docs.append("Legacy/N/A")
+            retrieved_chunk_ids.append(str(hit.get("idx", "N/A")))
             
+    st.sidebar.write(f"- Retrieved Docs: `{', '.join(set(retrieved_docs)) if retrieved_docs else 'None'}`")
+    st.sidebar.write(f"- Retrieved Chunk IDs: `{', '.join(retrieved_chunk_ids) if retrieved_chunk_ids else 'None'}`")
+    
     st.sidebar.markdown("### 🐞 Search Performance Metrics")
     times = st.session_state.get("debug_times", {})
     st.sidebar.write(f"- Embedding/Index Load: `{times.get('embedding', 0.0):.4f}s`")
@@ -305,13 +432,15 @@ if debug_mode:
     st.sidebar.write(f"**Last Similarity Score**: `{st.session_state.get('last_score', 0.0):.4f}`")
     
     with st.sidebar.expander("FAISS Top Search Hits", expanded=False):
-        top_hits_list = st.session_state.get("last_query_top_hits", [])
         if top_hits_list:
             for hit in top_hits_list:
-                # In LLM-based routing we retrieve top 3, show all top 5 retrieved details
                 tag = "✅ TOP CHUNK" if hit["rank"] <= 3 else "ℹ️ EXTRA CHUNK"
                 st.caption(f"**Rank {hit['rank']}** (Score: `{hit['score']:.4f}`) - {tag}")
-                st.caption(f"Chunk ID: `{hit['idx']}`")
+                meta = hit.get("meta")
+                if isinstance(meta, dict):
+                    st.caption(f"Doc: `{meta.get('filename')}` | Chunk: `{meta.get('chunk_id')}` | Page: `{meta.get('page')}`")
+                else:
+                    st.caption(f"Chunk ID: `{hit['idx']}`")
                 st.text(hit["text"])
                 st.markdown("---")
         else:
@@ -319,10 +448,10 @@ if debug_mode:
 
 # Main UI Area
 st.markdown("<h1 class='title-text'>ContextLens 🔍</h1>", unsafe_allow_html=True)
-if active_doc:
-    st.markdown(f"Currently querying: **`{active_doc}`**")
+if pdf_files:
+    st.markdown(f"Currently querying: **{len(pdf_files)} document(s)** in Knowledge Base")
 else:
-    st.markdown("No document loaded.")
+    st.markdown("No documents loaded.")
 
 st.markdown("---")
 
@@ -348,12 +477,12 @@ if st.session_state.messages:
         st.session_state.messages = []
         st.rerun()
 
-# Disable input if no active doc is selected
-chat_disabled = (active_doc is None)
+# Disable input if no documents are loaded
+chat_disabled = (len(pdf_files) == 0 or st.session_state.index is None)
 if chat_disabled:
-    st.warning("⚠️ **Please upload a PDF or select an existing document from the sidebar to start asking questions.**")
+    st.warning("⚠️ **Please upload one or more PDFs to the sidebar to start asking questions.**")
 
-query = st.chat_input("Ask a question about the active document...", disabled=chat_disabled)
+query = st.chat_input("Ask a question about the uploaded documents...", disabled=chat_disabled)
 
 if query:
     # Append and show user message
@@ -386,13 +515,13 @@ if query:
                 status_box.write("📥 **[STEP 1] Question received**: " + query)
                 print(f"[STEP 1] Question received: {query}")
                 
-                # [STEP 2] Active document
-                status_box.write(f"📄 **[STEP 2] Active document**: {active_doc}")
-                print(f"[STEP 2] Active document: {active_doc}")
+                # [STEP 2] Querying Knowledge Base
+                status_box.write(f"📄 **[STEP 2] Querying Knowledge Base** ({len(pdf_files)} documents)")
+                print(f"[STEP 2] Querying Knowledge Base: {', '.join(pdf_files)}")
                 
-                # [STEP 3] Loading FAISS index
-                status_box.write(f"📦 **[STEP 3] FAISS index status**: Ready for {active_doc} (contains {len(st.session_state.get('chunks', []))} chunks)")
-                print(f"[STEP 3] FAISS index status: Ready for {active_doc}")
+                # [STEP 3] FAISS index status
+                status_box.write(f"📦 **[STEP 3] FAISS index status**: Ready (contains {len(st.session_state.get('chunks', []))} chunks)")
+                print(f"[STEP 3] FAISS index status: Ready")
                 
                 # [STEP 4] Running similarity search
                 status_box.write("🔎 **[STEP 4] Running similarity search** over document chunks...")
@@ -414,7 +543,7 @@ if query:
                 st.session_state.last_query_top_hits = top_hits
                 
                 # Print FAISS details to terminal
-                print(f"[STEP 4] FAISS total vectors: {st.session_state.index.ntotal}")
+                print(f"[STEP 4] FAISS total vectors: {st.session_state.index.ntotal if st.session_state.index else 0}")
                 print("[STEP 4] Top similarity scores:")
                 for hit in top_hits[:5]:
                     print(f"   Rank {hit['rank']}: Score = {hit['score']:.6f}, Chunk Index = {hit['idx']}")
@@ -459,7 +588,19 @@ if query:
                     
                     if "YES" in clean_decision:
                         source = "📄 Document"
-                        doc_name = active_doc
+                        
+                        # Get unique retrieved document names
+                        doc_names = []
+                        for hit in top_hits[:len(retrieved_chunks)]:
+                            meta = hit.get("meta")
+                            if isinstance(meta, dict):
+                                doc_names.append(meta.get("filename", "N/A"))
+                        unique_docs = []
+                        for d in doc_names:
+                            if d not in unique_docs:
+                                unique_docs.append(d)
+                        doc_name = ", ".join(unique_docs) if unique_docs else "N/A"
+                        
                         system_instruction = "Answer ONLY using the provided document context. Do not use outside knowledge."
                         prompt = f"Document Context:\n{context_text}\n\nQuestion: {query}"
                         
@@ -470,6 +611,11 @@ if query:
                         start_t = time.time()
                         answer = generate_groq_answer(groq_client, prompt, system_instruction, model_name=groq_model)
                         st.session_state.debug_times["groq_api"] = time.time() - start_t
+                        
+                        # Append source citation to the answer text
+                        citation_text = format_sources(top_hits[:len(retrieved_chunks)])
+                        if citation_text:
+                            answer += f"\n\n{citation_text}"
                     else:
                         retrieved_chunks = []  # Clear to force fallback below
                 
