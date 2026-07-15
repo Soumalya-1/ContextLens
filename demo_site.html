@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apex Logistics — Global Shipping & Warehousing</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #007bff;
+            --primary-hover: #0056b3;
+            --dark: #1e293b;
+            --light: #f8fafc;
+            --gray: #64748b;
+            --border: #e2e8f0;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            color: var(--dark);
+            background-color: white;
+            line-height: 1.6;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
+
+        /* Navbar */
+        header {
+            background-color: white;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--primary);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo span {
+            color: var(--dark);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 30px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: var(--gray);
+            font-weight: 600;
+            font-size: 15px;
+            transition: color 0.2s ease;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+
+        /* Hero */
+        .hero {
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            color: white;
+            padding: 100px 20px;
+            text-align: center;
+        }
+
+        .hero-content {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .hero h1 {
+            font-size: 48px;
+            font-weight: 800;
+            line-height: 1.2;
+            margin-bottom: 20px;
+        }
+
+        .hero p {
+            font-size: 18px;
+            color: #cbd5e1;
+            margin-bottom: 30px;
+            font-weight: 300;
+        }
+
+        .btn {
+            display: inline-block;
+            background-color: var(--primary);
+            color: white;
+            padding: 14px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: background-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .btn:hover {
+            background-color: var(--primary-hover);
+            transform: translateY(-2px);
+        }
+
+        /* Sections */
+        .section {
+            padding: 80px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 32px;
+            margin-bottom: 50px;
+            position: relative;
+        }
+
+        .section-title::after {
+            content: '';
+            display: block;
+            width: 50px;
+            height: 4px;
+            background-color: var(--primary);
+            margin: 10px auto 0;
+            border-radius: 2px;
+        }
+
+        /* Services Grid */
+        .services-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+
+        .service-card {
+            background-color: var(--light);
+            border: 1px solid var(--border);
+            padding: 30px;
+            border-radius: 12px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .service-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.05);
+        }
+
+        .service-card h3 {
+            margin-bottom: 15px;
+            color: var(--dark);
+        }
+
+        .service-card p {
+            color: var(--gray);
+            font-size: 15px;
+        }
+
+        /* About & Contact Form */
+        .two-column {
+            display: flex;
+            gap: 50px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .column {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .column img {
+            width: 100%;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+
+        /* Form */
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-group label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .form-group input, .form-group textarea {
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            outline: none;
+            font-family: inherit;
+        }
+
+        .form-group input:focus, .form-group textarea:focus {
+            border-color: var(--primary);
+        }
+
+        /* Footer */
+        footer {
+            background-color: var(--dark);
+            color: #94a3b8;
+            padding: 40px 20px;
+            text-align: center;
+            border-top: 1px solid #334155;
+            font-size: 14px;
+        }
+
+        footer p {
+            margin-bottom: 10px;
+        }
+
+        /* ==========================================================================
+           Floating Chat Widget Styles
+           ========================================================================== */
+        #chat-widget-container {
+            position: fixed;
+            bottom: 25px;
+            right: 25px;
+            z-index: 999999;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Launcher Button */
+        #chat-widget-launcher {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 123, 255, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.25s ease, background-color 0.25s ease, box-shadow 0.25s ease;
+            position: absolute;
+            bottom: 0;
+            right: 0;
+        }
+
+        #chat-widget-launcher:hover {
+            transform: scale(1.06);
+            background-color: var(--primary-hover);
+        }
+
+        #chat-widget-launcher-icon {
+            font-size: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.25s ease;
+        }
+
+        /* Chat Widget Window */
+        #chat-widget-window {
+            position: absolute;
+            bottom: 75px;
+            right: 0;
+            width: 380px;
+            height: 600px;
+            max-height: calc(100vh - 120px);
+            background-color: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+            overflow: hidden;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            
+            /* Slide down / minimize styles */
+            opacity: 0;
+            transform: translateY(30px) scale(0.95);
+            transform-origin: bottom right;
+            pointer-events: none;
+            transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), 
+                        transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Open/Active State Styles */
+        #chat-widget-container.chat-widget-open #chat-widget-window {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+
+        #chat-widget-container.chat-widget-open #chat-widget-launcher {
+            background-color: #f43f5e;
+            box-shadow: 0 4px 15px rgba(244, 63, 94, 0.35);
+            transform: rotate(90deg);
+        }
+
+        /* Iframe */
+        #chat-widget-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+
+        /* Mobile Screens Responsive */
+        @media (max-width: 480px) {
+            #chat-widget-window {
+                width: calc(100vw - 30px);
+                height: calc(100vh - 110px);
+                right: 0px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Navigation Header -->
+    <header>
+        <div class="nav-container">
+            <a href="#" class="logo">⚓ Apex <span>Logistics</span></a>
+            <ul class="nav-links">
+                <li><a href="#">Home</a></li>
+                <li><a href="#services">Services</a></li>
+                <li><a href="#about">About Us</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Reliable Global Warehousing & Cargo Transport</h1>
+            <p>Fast, secure, and smart logistics solutions tailored to keep your company running smoothly across borders.</p>
+            <a href="#contact" class="btn">Get a Quote</a>
+        </div>
+    </section>
+
+    <!-- Services Section -->
+    <section id="services" class="section">
+        <h2 class="section-title">Our Services</h2>
+        <div class="services-grid">
+            <div class="service-card">
+                <h3>✈️ Air Freight</h3>
+                <p>Express shipping and overnight transport services to international airports worldwide with full digital tracking.</p>
+            </div>
+            <div class="service-card">
+                <h3>🚢 Ocean Cargo</h3>
+                <p>Cost-effective sea freight solutions for container loads (FCL/LCL) through all major sea lanes.</p>
+            </div>
+            <div class="service-card">
+                <h3>🏢 Smart Warehousing</h3>
+                <p>Persistent storage solutions, inventory management, sorting, packaging, and real-time stock dashboards.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Section -->
+    <section id="about" class="section" style="background-color: var(--light); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+        <div class="two-column">
+            <div class="column">
+                <h2 style="font-size: 32px; margin-bottom: 20px;">Moving the World, One Package at a Time</h2>
+                <p style="color: var(--gray); margin-bottom: 20px;">Founded in 2012, Apex Logistics provides state-of-the-art global supply chain services. Our cargo handlers, custom brokers, and support technicians ensure your product moves safely from manufacturing plants directly to customer doorsteps.</p>
+                <p style="color: var(--gray);">We operate in 40+ countries, offering end-to-end coverage, standard customs clearance, and round-the-clock support.</p>
+            </div>
+            <div class="column">
+                <!-- Placeholder SVG Image representing logistics/warehousing -->
+                <svg viewBox="0 0 500 300" width="100%" height="auto" style="background-color: #e2e8f0; border-radius: 12px;">
+                    <rect width="100%" height="100%" fill="#cbd5e1"/>
+                    <text x="50%" y="50%" font-family="'Outfit', sans-serif" font-size="20" font-weight="bold" fill="#64748b" dominant-baseline="middle" text-anchor="middle">Logistics Illustration Placeholder</text>
+                </svg>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section id="contact" class="section">
+        <h2 class="section-title">Contact Us</h2>
+        <div class="two-column">
+            <div class="column">
+                <h3 style="margin-bottom: 15px;">Send Us a Message</h3>
+                <p style="color: var(--gray); margin-bottom: 30px;">Have questions about our shipping rates, transit times, or custom brokerages? Drop us a line and our sales team will reply within 24 hours.</p>
+                <form onsubmit="event.preventDefault(); alert('Message sent successfully!');">
+                    <div class="form-group">
+                        <label for="name">Name</label>
+                        <input type="text" id="name" required placeholder="John Doe">
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" required placeholder="john@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="message">Message</label>
+                        <textarea id="message" rows="4" required placeholder="Describe your logistics requirements..."></textarea>
+                    </div>
+                    <button type="submit" class="btn" style="border: none; cursor: pointer;">Send Message</button>
+                </form>
+            </div>
+            <div class="column" style="padding-left: 20px;">
+                <h3 style="margin-bottom: 15px;">Corporate Headquarters</h3>
+                <p style="color: var(--gray); margin-bottom: 20px;">100 Logistics Way, Suite 400<br>Chicago, IL 60666<br>United States</p>
+                <h3 style="margin-bottom: 10px;">Support Contact</h3>
+                <p style="color: var(--gray);">Email: info@apexlogistics.demo<br>Phone: +1 (800) 555-APEX</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 Apex Logistics Inc. All rights reserved.</p>
+        <p style="font-size: 12px; color: #64748b;">This is a demonstration company website presenting the embedded support chat widget.</p>
+    </footer>
+
+    <!-- ==========================================================================
+         Floating Chat Widget Element
+         ========================================================================== -->
+    <div id="chat-widget-container" class="chat-widget-closed">
+        <!-- Floating chat window widget containing the iframe -->
+        <div id="chat-widget-window">
+            <iframe src="http://localhost:8501/?embed=true&widget=true" id="chat-widget-iframe" title="Support Chatbot Widget"></iframe>
+        </div>
+        <!-- Launcher button -->
+        <button id="chat-widget-launcher" onclick="toggleChatWidget()" aria-label="Open support chat">
+            <span id="chat-widget-launcher-icon">💬</span>
+        </button>
+    </div>
+
+    <!-- Toggle Action Script -->
+    <script>
+        function toggleChatWidget() {
+            const container = document.getElementById('chat-widget-container');
+            const icon = document.getElementById('chat-widget-launcher-icon');
+            
+            if (container.classList.contains('chat-widget-open')) {
+                container.classList.remove('chat-widget-open');
+                container.classList.add('chat-widget-closed');
+                icon.innerText = '💬';
+            } else {
+                container.classList.remove('chat-widget-closed');
+                container.classList.add('chat-widget-open');
+                icon.innerText = '✕';
+            }
+        }
+    </script>
+</body>
+</html>

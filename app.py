@@ -17,15 +17,20 @@ from rag import (
 load_dotenv()
 
 # Streamlit Page Configurations
+# Check query parameters for widget mode
+is_widget = st.query_params.get("widget") == "true"
+initial_sidebar = "collapsed" if is_widget else "expanded"
+
+# Streamlit Page Configurations
 st.set_page_config(
     page_title="ContextLens - Document QA Assistant",
     page_icon="🔍",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state=initial_sidebar
 )
 
 # Premium UI styling
-st.markdown("""
+css_styles = """
 <style>
     /* Google Fonts */
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@300;400;600&display=swap');
@@ -71,8 +76,35 @@ st.markdown("""
         color: #00bcd4;
         font-weight: 600;
     }
-</style>
-""", unsafe_allow_html=True)
+"""
+
+if is_widget:
+    css_styles += """
+    /* Completely hide Streamlit sidebar */
+    [data-testid="sidebar-content"] {
+        display: none !important;
+    }
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+    /* Expand content space and reduce padding */
+    div.block-container {
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+    }
+    /* Hide Streamlit top header and branding decoration */
+    header, [data-testid="stHeader"] {
+        display: none !important;
+    }
+    #MainMenu, footer {
+        display: none !important;
+    }
+    """
+
+css_styles += "</style>"
+st.markdown(css_styles, unsafe_allow_html=True)
 
 # Configuration Setup
 groq_api_key = os.getenv("GROQ_API_KEY")
@@ -332,18 +364,22 @@ if "index" not in st.session_state or "chunks" not in st.session_state:
 pdf_files = sorted([f for f in os.listdir(DOCS_DIR) if f.lower().endswith(".pdf")])
 
 # Sidebar Layout
-st.sidebar.markdown("<h2 style='margin-bottom: 0px;'>ContextLens 🔍</h2>", unsafe_allow_html=True)
-st.sidebar.caption("Website FAQ / Support Chatbot")
-st.sidebar.markdown("---")
+if not is_widget:
+    st.sidebar.markdown("<h2 style='margin-bottom: 0px;'>ContextLens 🔍</h2>", unsafe_allow_html=True)
+    st.sidebar.caption("Website FAQ / Support Chatbot")
+    st.sidebar.markdown("---")
 
 # Mode selection toggle
-mode = st.sidebar.radio(
-    "👤 Mode",
-    options=["Visitor", "Admin"],
-    index=0,
-    help="Select 'Visitor' to chat with the FAQ bot, or 'Admin' to manage documentation."
-)
-st.sidebar.markdown("---")
+if is_widget:
+    mode = "Visitor"
+else:
+    mode = st.sidebar.radio(
+        "👤 Mode",
+        options=["Visitor", "Admin"],
+        index=0,
+        help="Select 'Visitor' to chat with the FAQ bot, or 'Admin' to manage documentation."
+    )
+    st.sidebar.markdown("---")
 
 if mode == "Admin":
     st.sidebar.markdown("### 🛠️ Admin Dashboard")
@@ -521,13 +557,22 @@ else:
     debug_mode = False
 
 # Main UI Area
-st.markdown("<h1 class='title-text'>ContextLens 🔍</h1>", unsafe_allow_html=True)
-if pdf_files:
-    st.markdown(f"Currently querying: **{len(pdf_files)} document(s)** in Knowledge Base")
+if is_widget:
+    st.markdown("""
+    <div style="background-color: #007bff; color: white; padding: 15px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 4px 10px rgba(0, 123, 255, 0.15);">
+        <h3 style="margin: 0; font-family: 'Outfit', sans-serif; font-size: 1.25rem;">🤖 AI Support Assistant</h3>
+        <p style="margin: 5px 0 0 0; font-size: 0.88rem; opacity: 0.95; line-height: 1.4;">
+            Hello! Ask anything about our products, shipping, warranty or policies.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 else:
-    st.markdown("No documents loaded.")
-
-st.markdown("---")
+    st.markdown("<h1 class='title-text'>ContextLens 🔍</h1>", unsafe_allow_html=True)
+    if pdf_files:
+        st.markdown(f"Currently querying: **{len(pdf_files)} document(s)** in Knowledge Base")
+    else:
+        st.markdown("No documents loaded.")
+    st.markdown("---")
 
 # Display chat history
 for msg in st.session_state.messages:
