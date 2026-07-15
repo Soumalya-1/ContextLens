@@ -21,8 +21,9 @@ def build_faiss_index(chunks: list, model: SentenceTransformer) -> tuple:
     if not chunks:
         return None, []
         
-    # Generate normalized embeddings
-    embeddings = model.encode(chunks, normalize_embeddings=True)
+    # Generate normalized embeddings (extract text if chunk is a dict)
+    texts = [c["text"] if isinstance(c, dict) else c for c in chunks]
+    embeddings = model.encode(texts, normalize_embeddings=True)
     embeddings = np.array(embeddings).astype("float32")
     
     # Create Inner Product index (equivalent to Cosine Similarity for normalized vectors)
@@ -63,11 +64,20 @@ def query_document(
         top_hits = []
         for rank_idx, (score, idx) in enumerate(zip(scores[0], indices[0])):
             if idx != -1:
+                chunk_item = chunks[idx]
+                if isinstance(chunk_item, dict):
+                    chunk_text = chunk_item["text"]
+                    meta = chunk_item
+                else:
+                    chunk_text = chunk_item
+                    meta = None
+                    
                 top_hits.append({
                     "rank": rank_idx + 1,
                     "idx": int(idx),
                     "score": float(score),
-                    "text": chunks[idx]
+                    "text": chunk_text,
+                    "meta": meta
                 })
         
         # Select chunks that are above the similarity threshold (up to top_k chunks)

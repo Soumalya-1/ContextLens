@@ -7,8 +7,9 @@ ContextLens is a modern, lightweight Website FAQ / Support Chatbot that uses **R
 ## 🚀 Key Features
 
 - **Streamlit Interface**: Clean, ChatGPT-like conversation layout built for GitHub portfolio presentation.
-- **PDF Upload & Storage**: Upload files via `st.file_uploader` and store them persistently under `data/documents/`.
-- **FAISS Vector Search**: Fast similarity search using `IndexFlatIP` indexing.
+- **Multi-Document Support**: Upload and manage multiple PDF files simultaneously, consolidating their contents into a single unified knowledge base.
+- **Knowledge Base Management**: View, add, and delete documents in real-time from the sidebar, with stats on total chunks, docs, and last indexed time.
+- **FAISS Vector Search**: Fast similarity search over all documents in the knowledge base using `IndexFlatIP` indexing.
 - **SentenceTransformer Embeddings**: High-quality dense vector representations using `all-MiniLM-L6-v2`.
 - **Groq LLM Integration**: Fast inference with the Groq client (`openai/gpt-oss-20b` or custom models).
 - **Intelligent RAG Routing**: Instead of relying purely on brittle thresholds, ContextLens uses an LLM-based sufficiency auditor to evaluate context before answering.
@@ -30,13 +31,20 @@ ContextLens is a modern, lightweight Website FAQ / Support Chatbot that uses **R
 ## 🏗️ Project Architecture
 
 ```text
-DocQuery-AI/
+ContextLens/
 ├── app.py           # Streamlit application (UI layout, state management, chat interaction)
 ├── rag.py           # Core RAG pipeline (index build, save/load persistence, Groq API client)
 ├── utils.py         # PDF text extraction and text chunking
 ├── requirements.txt # Project Python package dependencies
 ├── .env.example     # Configuration template for API keys and models
-└── README.md        # System documentation and instructions
+├── README.md        # System documentation and instructions
+└── data/
+    ├── documents/   # Persistent folder where uploaded PDF files are stored
+    └── index/       # Index files directory
+        ├── kb.index # Unified FAISS index containing vectors of all files
+        ├── kb.chunks.json # Unified chunks list containing text and metadata
+        ├── kb.meta.json # Knowledge Base metadata (docs count, chunks count, last indexed)
+        └── cache/   # Cached chunk JSONs for individual PDF files (for incremental indexing)
 ```
 
 ---
@@ -45,19 +53,18 @@ DocQuery-AI/
 
 ```mermaid
 graph TD
-    A[Start ContextLens] --> B[Scan data/documents/]
-    B --> C{User Action}
-    C -->|Upload PDF| D[Save to data/documents/ & Select it]
-    C -->|Select PDF| E[Load Selected PDF]
-    D --> F{Index Exists in data/index/?}
-    E --> F
-    F -->|Yes| G[Load FAISS Index & Metadata instantly]
-    F -->|No| H[Extract, Chunk, Embed & Build Index]
-    H --> I[Save FAISS Index & Metadata to disk]
-    I --> G
-    G --> J[Enable Chat Input]
+    A[Start ContextLens] --> B[Initialize Unified KB Index]
+    B --> C{Scan data/documents/}
+    C -->|Check Cache| D[Identify New/Deleted PDFs]
+    D -->|Process New PDFs| E[Extract text page-by-page & chunk with metadata]
+    E -->|Cache chunks| F[Save to data/index/cache/]
+    F --> G[Aggregate all cached chunks of active PDFs]
+    G --> H[Rebuild FAISS Vector Index once]
+    H --> I[Save kb.index, kb.chunks.json & kb.meta.json]
+    I --> J[Enable Chat Input]
+    C -->|No changes| J
     J --> K[User asks Question]
-    K --> L[Retrieve top 3 chunks from FAISS]
+    K --> L[Retrieve top 3 chunks from unified FAISS Index]
     L --> M[Ask Groq: Is context sufficient to answer?]
     M --> N{Decision YES?}
     N -->|Yes| O[Generate answer using Document Context]
@@ -150,7 +157,6 @@ Open `http://localhost:8501` in your browser.
 ---
 
 ## 🔮 Future Improvements
-- **Multi-Document RAG**: Enable querying across multiple uploaded PDFs simultaneously.
 - **Custom System Instructions**: Let users configure system prompts directly in the Streamlit UI.
 - **Document Formats**: Extend support to include `.txt`, `.docx`, and `.csv` files.
 - **Offline Mode**: Add support for local vector search and LLMs via Ollama.
